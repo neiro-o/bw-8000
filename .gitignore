@@ -1,0 +1,5 @@
+node_modules/
+.chrome-profile/
+.edge-profile/
+.env
+data/stats.json
