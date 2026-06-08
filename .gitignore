@@ -3,3 +3,4 @@ node_modules/
 .edge-profile/
 .env
 data/stats.json
+AGENTS.md
