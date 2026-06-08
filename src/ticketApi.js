@@ -1,13 +1,16 @@
-import { ticketApiUrl } from './config.js';
+import { config, ticketApiUrl } from './config.js';
 
 const unavailableFlags = new Set([8, 4, 1]);
 
 export async function fetchTicketStatus(request, projectId, dayFlag) {
-  const response = await request.get(ticketApiUrl(projectId), {
-    headers: {
-      referer: `https://mall.bilibili.com/neul-next/ticket/detail.html?id=${projectId}`
-    }
-  });
+  const headers = {
+    referer: `https://mall.bilibili.com/neul-next/ticket/detail.html?id=${projectId}`,
+    origin: 'https://mall.bilibili.com',
+  };
+  if (config.userAgent) headers['user-agent'] = config.userAgent;
+  if (config.acceptLanguage) headers['accept-language'] = config.acceptLanguage;
+
+  const response = await request.get(ticketApiUrl(projectId), { headers });
 
   if (!response.ok()) {
     throw new Error(`Ticket API failed: ${response.status()} ${response.statusText()}`);

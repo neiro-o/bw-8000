@@ -9,8 +9,11 @@ async function dispatchVisibilityChange(page) {
 }
 
 async function checkAndClickLimit(page) {
-  const messageIcon = page.locator(selectors.messageIcon).first();
-  if (await isVisible(messageIcon)) {
+  const messageIconVisible = await page.evaluate(() => {
+    const el = document.querySelector('.bili-message-icon');
+    return el ? window.getComputedStyle(el).display !== 'none' : false;
+  }).catch(() => false);
+  if (messageIconVisible) {
     console.warn('[confirm] visible message icon detected, returning to detail page');
     await page.goto(detailUrl(config.projectId), { waitUntil: 'domcontentloaded' });
     return;

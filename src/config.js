@@ -7,9 +7,14 @@ export const config = {
   edgeProfile: process.env.BW_EDGE_PROFILE ?? 'E:/code/bw_tickets/.edge-profile',
   browserExecutable: process.env.BW_BROWSER_EXECUTABLE ?? '',
   headless: process.env.BW_HEADLESS === '1',
+  browserWidth: Number(process.env.BW_BROWSER_WIDTH ?? 720),
+  browserHeight: Number(process.env.BW_BROWSER_HEIGHT ?? 1080),
   maxDetailReloadWaitMs: Number(process.env.BW_DETAIL_RELOAD_WAIT_MS ?? 10000),
   submitWithoutTicketChance: Number(process.env.BW_SUBMIT_WITHOUT_TICKET_CHANCE ?? 0.26),
-  successUrl: process.env.BW_SUCCESS_URL ?? 'https://www.bilibili.com/video/BV1sa4y1H7ek'
+  successUrl: process.env.BW_SUCCESS_URL ?? 'https://www.bilibili.com/video/BV1sa4y1H7ek',
+  userAgent: process.env.BW_USER_AGENT ?? '',
+  hideWebdriver: process.env.BW_HIDE_WEBDRIVER === '1',
+  acceptLanguage: process.env.BW_ACCEPT_LANGUAGE ?? '',
 };
 
 export function detailUrl(projectId = config.projectId) {

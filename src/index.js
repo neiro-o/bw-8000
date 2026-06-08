@@ -20,19 +20,47 @@ const { executable, browser } = resolveBrowserExecutableOrThrow(config.browserEx
 const userDataDir = browser === 'edge' ? config.edgeProfile : config.chromeProfile;
 console.log(`[browser] using ${browser} at ${executable}`);
 console.log(`[browser] profile: ${userDataDir}`);
+console.log(`[browser] size: ${config.browserWidth}x${config.browserHeight}`);
 
-const context = await chromium.launchPersistentContext(userDataDir, {
+const contextOptions = {
   executablePath: executable,
   headless: config.headless,
-  viewport: null,
-  args: ['--start-maximized']
-});
+  ignoreDefaultArgs: ['--no-sandbox'],
+  viewport: {
+    width: config.browserWidth,
+    height: config.browserHeight
+  },
+  args: [`--window-size=${config.browserWidth},${config.browserHeight}`],
+};
+if (config.userAgent) {
+  contextOptions.userAgent = config.userAgent;
+  console.log(`[browser] userAgent: ${config.userAgent}`);
+}
+if (config.acceptLanguage) {
+  contextOptions.locale = config.acceptLanguage;
+  console.log(`[browser] acceptLanguage: ${config.acceptLanguage}`);
+}
+
+const context = await chromium.launchPersistentContext(userDataDir, contextOptions);
+
+if (config.hideWebdriver) {
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
+    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
+    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
+  });
+  console.log('[browser] webdriver fingerprint hidden');
+}
 
 const page = context.pages()[0] ?? await context.newPage();
 
 const BROWSER_LOG_IGNORE = [
   /Refused to get unsafe header/,
   /This is not supported in browser version of superagent/,
+  /bili-image/,
+  /bridge加载完成后依然未能支持该方法/,
+  /parser-blocking.*cross site/,
 ];
 
 page.on('console', message => {
@@ -44,6 +72,11 @@ page.on('console', message => {
 
 page.on('pageerror', error => {
   console.error(`[browser:error] ${error.message}`);
+});
+
+context.on('close', () => {
+  console.log('[browser] browser closed, exiting.');
+  process.exit(0);
 });
 
 if (args.has('--login')) {
@@ -69,6 +102,11 @@ while (true) {
     await runConfirmOrderPage(page, context);
   } else if (url.startsWith('https://pay.bilibili.com')) {
     await runPaymentPage(page);
+  } else if (
+    url.startsWith('https://mall.bilibili.com') ||
+    url.startsWith('https://pay.bilibili.com')
+  ) {
+    console.log(`[router] unhandled bilibili page, waiting: ${url}`);
   } else {
     console.log(`[router] unhandled page, returning to detail page: ${url}`);
     await page.goto(detailUrl(config.projectId), { waitUntil: 'domcontentloaded' });

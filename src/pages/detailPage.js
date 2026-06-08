@@ -12,8 +12,9 @@ async function clickTicketCategory(page) {
   await page.locator(selectors.ticketRadioGroups).evaluateAll(groups => {
     for (const group of groups) {
       const labels = Array.from(group.children);
-      const lastActive = labels.reverse().find(label => label.classList.contains('active'));
-      if (lastActive) lastActive.click();
+      const lastActive = [...labels].reverse().find(label => label.classList.contains('active'));
+      const target = lastActive ?? labels.find(label => !label.classList.contains('disabled'));
+      if (target) target.click();
     }
   });
 }
@@ -31,6 +32,12 @@ function forcePresaleStatus(body) {
     for (const ticket of screen.ticket_list) {
       ticket.saleFlag = { ...presale };
       ticket.sale_flag = { ...presale };
+      ticket.sale_flag_number = presale.number;
+      ticket.clickable = true;
+      if (ticket.saleStart) ticket.saleStart = '2020-01-01 00:00:00';
+      if (ticket.saleEnd) ticket.saleEnd = '2099-01-01 00:00:00';
+      if (ticket.sale_start) ticket.sale_start = '2020-01-01 00:00:00';
+      if (ticket.sale_end) ticket.sale_end = '2099-01-01 00:00:00';
     }
   }
 
@@ -54,7 +61,13 @@ async function installDetailApiHook(page) {
 
     try {
       const response = await route.fetch();
-      const body = forcePresaleStatus(await response.json());
+      const rawBody = await response.json();
+      const screenCount = rawBody?.data?.screen_list?.length ?? 0;
+      const body = forcePresaleStatus(rawBody);
+      const screen0 = body?.data?.screen_list?.[0];
+      const hookOk = screen0?.saleFlag?.number === 2 && screen0?.sale_flag?.number === 2;
+      const ticketList = screen0?.ticket_list ?? [];
+      console.log(`[detail] getV2 hook ${hookOk ? '✓ OK' : '✗ FAILED'} | http ${response.status()} | screens=${screenCount} | tickets=${ticketList.length}`);
       await route.fulfill({ response, json: body });
     } catch (error) {
       console.error(`[detail] API hook failed: ${error.message}`);
@@ -98,13 +111,17 @@ async function openPurchasePage(page) {
   await dispatchVisibilityChange(page);
   await sleep(100);
 
-  const button = page.locator(selectors.detailBuyButton).first();
-  if (!(await isClickableButton(button))) {
-    console.info('[detail] buy button is not clickable yet');
-    return false;
+  const modalAlreadyOpen = await page.locator('.ticket-modal-container').isVisible().catch(() => false);
+  if (!modalAlreadyOpen) {
+    const button = page.locator(selectors.detailBuyButton).first();
+    if (!(await isClickableButton(button))) {
+      console.info('[detail] buy button is not clickable yet');
+      return false;
+    }
+    await button.click();
+  } else {
+    console.info('[detail] ticket modal already open, skipping buy button click');
   }
-
-  await button.click();
 
   const entered = await Promise.race([
     openPage2(page),
