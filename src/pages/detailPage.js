@@ -135,12 +135,54 @@ async function openPurchasePage(page) {
   return entered;
 }
 
+function parseDetailStartTime(value, now = new Date()) {
+  const text = value.trim();
+  if (!text) return null;
+
+  const match = text.match(/^(\d{1,2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?$/);
+  if (!match) return null;
+
+  const [, hourText, minuteText, secondText, fractionText = ''] = match;
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  const millisecond = Number((fractionText + '000').slice(0, 3));
+
+  if (hour > 23 || minute > 59 || second > 59) return null;
+
+  const target = new Date(now);
+  target.setHours(hour, minute, second, millisecond);
+  return target;
+}
+
+async function waitUntilDetailStartTime() {
+  if (!config.detailStartTime.trim()) return;
+
+  const target = parseDetailStartTime(config.detailStartTime);
+  if (!target) {
+    console.warn(`[detail] invalid BW_DETAIL_START_TIME: ${config.detailStartTime}`);
+    return;
+  }
+
+  let lastLogAt = 0;
+  while (Date.now() < target.getTime()) {
+    const remainingMs = target.getTime() - Date.now();
+    const now = Date.now();
+    if (now - lastLogAt >= 5000 || remainingMs <= 1000) {
+      console.log(`[detail] waiting for start time ${config.detailStartTime}, remaining ${(remainingMs / 1000).toFixed(1)}s`);
+      lastLogAt = now;
+    }
+    await sleep(Math.min(100, Math.max(1, remainingMs)));
+  }
+}
+
 export async function runDetailPage(page, context) {
   console.log(`[detail] watching project ${config.projectId}, day flag ${config.dayFlag}`);
   const hook = await installDetailApiHook(page);
   console.log('[detail] installed detail-page ticket API hook');
 
   try {
+    await waitUntilDetailStartTime();
     await page.reload({ waitUntil: 'domcontentloaded' });
     await openPurchasePage(page);
 
