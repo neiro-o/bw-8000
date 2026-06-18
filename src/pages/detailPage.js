@@ -64,11 +64,6 @@ function forcePresaleStatus(body) {
 async function installDetailApiHook(page) {
   const pattern = '**/api/ticket/project/getV2?**';
   const handler = async route => {
-    if (!page.url().startsWith('https://mall.bilibili.com/neul-next/ticket/detail.html')) {
-      await route.continue();
-      return;
-    }
-
     const url = new URL(route.request().url());
     const requestProjectId = url.searchParams.get('project_id') ?? url.searchParams.get('id');
     if (requestProjectId !== String(config.projectId)) {
@@ -94,6 +89,14 @@ async function installDetailApiHook(page) {
 
   await page.route(pattern, handler);
   return { pattern, handler };
+}
+
+export async function ensureDetailApiHook(page) {
+  // Install once per detail-page visit so getV2 can be intercepted before navigation starts.
+  if (!page.__bwDetailApiHook) {
+    page.__bwDetailApiHook = await installDetailApiHook(page);
+  }
+  return page.__bwDetailApiHook;
 }
 
 async function updateVenueStatus(page, timeText, allSold) {
@@ -151,14 +154,11 @@ async function openPage2(page) {
   // Step 2.3: Select the target ticket category by BW_TICKET_INDEX.
   if (!(await clickIndexedRadio(page, selectors.ticketRadioGroups, config.ticketIndex, 'ticket'))) return false;
 
-  // Step 2.4: Submit the modal selection with the bottom action button.
+  // Step 2.4: Confirm the bottom action button exists before the click loop handles submission.
   const bottomButton = page.locator(selectors.detailBottomButton).first();
-  if (await isClickableButton(bottomButton)) {
-    await bottomButton.click();
-    return true;
-  }
+  if (await bottomButton.count()) return true;
 
-  console.info('[detail] bottom button is not clickable yet');
+  console.info('[detail] bottom button not found yet');
   return false;
 }
 
@@ -186,11 +186,62 @@ async function closeTicketModal(page) {
   await page.locator(selectors.detailModalClose).first().click().catch(() => {});
 }
 
-async function waitForDetailNavigation(page, previousUrl) {
-  // Step 3.2: After submitting, give the page 1.5s to leave the detail page.
-  await sleep(1500);
+async function isBottomButtonDisabled(button) {
+  // Step 3.2: Use the button class as the restart signal requested by the page markup.
+  const className = await button.getAttribute('class').catch(() => '');
+  return className?.includes('is-disabled') ?? false;
+}
+
+function hasLeftDetailPage(page, previousUrl) {
   const currentUrl = page.url();
   return currentUrl !== previousUrl && !currentUrl.startsWith('https://mall.bilibili.com/neul-next/ticket/detail.html');
+}
+
+async function waitForOriginalRestartWindow(page, previousUrl) {
+  // Step 3.3: Preserve the old 1.5s observation only after the button reports is-disabled.
+  await sleep(1500);
+  return hasLeftDetailPage(page, previousUrl);
+}
+
+async function clickBottomButtonUntilNavigationOrDisabled(page, previousUrl) {
+  const bottomButton = page.locator(selectors.detailBottomButton).first();
+
+  if (!(await bottomButton.count())) {
+    console.info('[detail] bottom button not found, restarting selection flow');
+    return false;
+  }
+
+  // Step 3.4: Click once first, then inspect whether the button turned disabled.
+  await bottomButton.click().catch(error => {
+    console.warn(`[detail] first bottom button click failed: ${error.message}`);
+  });
+  await recordEnter(nowText());
+
+  if (hasLeftDetailPage(page, previousUrl)) return true;
+
+  if (await isBottomButtonDisabled(bottomButton)) {
+    console.info('[detail] bottom button disabled after first click, waiting original 1.5s window');
+    return waitForOriginalRestartWindow(page, previousUrl);
+  }
+
+  while (page.url().startsWith('https://mall.bilibili.com/neul-next/ticket/detail.html')) {
+    // Step 3.5: If the submit button becomes disabled later, use the same original 1.5s window.
+    if (!(await bottomButton.count()) || await isBottomButtonDisabled(bottomButton)) {
+      console.info('[detail] bottom button is disabled, waiting original 1.5s window');
+      return waitForOriginalRestartWindow(page, previousUrl);
+    }
+
+    // Step 3.6: While enabled, keep clicking the submit button at a random 0.5-1.0s interval.
+    await bottomButton.click().catch(error => {
+      console.warn(`[detail] bottom button click failed: ${error.message}`);
+    });
+
+    await sleep(500 + Math.floor(Math.random() * 501));
+
+    if (hasLeftDetailPage(page, previousUrl)) return true;
+  }
+
+  return true;
 }
 
 async function runPurchaseAttemptLoop(page) {
@@ -203,10 +254,9 @@ async function runPurchaseAttemptLoop(page) {
     const submitted = await openPurchasePage(page);
     if (!submitted) return false;
 
-    await recordEnter(nowText());
-    if (await waitForDetailNavigation(page, beforeSubmitUrl)) return true;
+    if (await clickBottomButtonUntilNavigationOrDisabled(page, beforeSubmitUrl)) return true;
 
-    console.warn('[detail] still on detail page after submit, closing modal and retrying');
+    console.warn('[detail] restarting after disabled bottom button');
     await closeTicketModal(page);
   }
 
@@ -214,16 +264,12 @@ async function runPurchaseAttemptLoop(page) {
 }
 
 export async function runDetailPage(page, context) {
-  await waitUntilAutomationStartTime('detail');
   console.log(`[detail] watching project ${config.projectId}, day flag ${config.dayFlag}`);
-  const hook = await installDetailApiHook(page);
+  // Keep the detail API hook installed at all times; detail getV2 may fire before this page runner starts.
+  await ensureDetailApiHook(page);
   console.log('[detail] installed detail-page ticket API hook');
 
-  try {
-    // Step 4/5: Do a direct purchase-attempt flow; no detail-page polling loop here.
-    await runPurchaseAttemptLoop(page);
-  } finally {
-    await page.unroute(hook.pattern, hook.handler).catch(() => {});
-    console.log('[detail] removed detail-page ticket API hook');
-  }
+  await waitUntilAutomationStartTime('detail');
+  // Step 4/5: Do a direct purchase-attempt flow; no detail-page polling loop here.
+  await runPurchaseAttemptLoop(page);
 }

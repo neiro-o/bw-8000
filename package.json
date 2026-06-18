@@ -5,6 +5,8 @@
   "type": "module",
   "packageManager": "pnpm@11.5.2",
   "scripts": {
+    "setenv": "node scripts/setenv.js",
+    "setindex": "node --env-file=.env scripts/setindex.js",
     "start": "node --env-file=.env src/index.js",
     "login": "node --env-file=.env src/index.js --login",
     "reset-stats": "node --env-file=.env src/index.js --reset-stats"

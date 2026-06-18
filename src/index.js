@@ -2,7 +2,7 @@ import { resolveBrowserExecutableOrThrow } from './chromePath.js';
 import { config, detailUrl } from './config.js';
 import { resetStats } from './storage.js';
 import { runConfirmOrderPage } from './pages/confirmOrderPage.js';
-import { runDetailPage } from './pages/detailPage.js';
+import { ensureDetailApiHook, runDetailPage } from './pages/detailPage.js';
 import { runPaymentPage } from './pages/paymentPage.js';
 import { sleep } from './utils.js';
 
@@ -97,7 +97,12 @@ if (args.has('--login')) {
   while (true) await sleep(1000);
 }
 
-await page.goto(detailUrl(config.projectId), { waitUntil: 'domcontentloaded' });
+async function gotoDetailPage() {
+  await ensureDetailApiHook(page);
+  await page.goto(detailUrl(config.projectId), { waitUntil: 'domcontentloaded' });
+}
+
+await gotoDetailPage();
 
 while (true) {
   const url = page.url();
@@ -108,7 +113,7 @@ while (true) {
       await runDetailPage(page, context);
     } else {
       console.warn(`[router] current detail page project does not match ${config.projectId}: ${url}`);
-      await page.goto(detailUrl(config.projectId), { waitUntil: 'domcontentloaded' });
+      await gotoDetailPage();
     }
   } else if (url.startsWith('https://mall.bilibili.com/neul-next/ticket/confirmOrder.html')) {
     await runConfirmOrderPage(page, context);
@@ -121,7 +126,7 @@ while (true) {
     console.log(`[router] unhandled bilibili page, waiting: ${url}`);
   } else {
     console.log(`[router] unhandled page, returning to detail page: ${url}`);
-    await page.goto(detailUrl(config.projectId), { waitUntil: 'domcontentloaded' });
+    await gotoDetailPage();
   }
 
   await sleep(250);

@@ -1,87 +1,119 @@
-# BW Ticket Playwright Automation
+# BW Zoumadeng
 
-这是一个 Node.js 22 + Playwright 本地自动化项目，用本机 Chrome 或 Edge 运行 Bilibili 票务页面流程。
+去年单人拿下三张，战绩可查。
 
-程序会在详情页轮询查票，发现可售票后进入购买流程，在确认订单页选择购票人并提交订单。到达支付页后会停止自动化并打开提醒 URL，支付步骤需要人工处理。
+如果你是新手，请阅读下面的配置教程，如果还是不会，请淘宝闪购搜索超级小桀。
 
-## 1. 准备环境
+## 新手快速配置
 
-需要先安装：
+### 1. 先装 Git、Node.js 和浏览器
 
+你需要准备这些东西：
+
+- Git
 - Node.js `>=22.22.0`
-- pnpm `11.5.2`
-- Google Chrome，推荐
-- Microsoft Edge，可作为 Chrome 不可用时的回退
+- Chrome 或 Edge，二选一就行
 
-确认版本：
+Windows 安装 Node.js 时，记得勾上这个选项：
 
-```powershell
-node -v
-pnpm -v
+```txt
+Automatically install the necessary tools. Note that this will also install Chocolatey...
 ```
 
-## 2. 安装依赖
+安装器结束后，命令行窗口可能还会继续装一段时间。等它跑完再关，**不要看到 Node.js 安装界面结束就直接关掉所有窗口**。
 
-在项目目录执行：
+装好以后可以打开**新的**命令行确认一下：
+
+```powershell
+# Windows 打开 cmd，不要开 PowerShell
+git -v
+node -v
+```
+
+### 2. 下载项目
+
+找一个你平时放代码的目录，执行：
+
+```powershell
+git clone https://github.com/neiro-o/bw-8000.git
+cd bw-8000
+```
+
+### 3. 安装 pnpm 和项目依赖
+
+先安装 pnpm：
+
+```powershell
+npm install -g pnpm
+```
+
+然后在项目目录里安装依赖：
 
 ```powershell
 pnpm install
 ```
 
-本项目默认使用本机已安装的浏览器，不依赖 Playwright 下载自带浏览器。
+如果你不确定自己是不是在项目目录，看当前目录里有没有 `package.json`。有的话再执行 `pnpm install`。
 
-## 3. 创建配置文件
-
-复制示例配置：
-
-```powershell
-Copy-Item .env.example .env
-```
-
-然后编辑 `.env`。通常至少确认这些配置：
-
-```dotenv
-BW_PROJECT_ID=1002174
-BW_DAY_FLAG=0
-BW_CHECK_TICKET_INTERVAL_MS=1000
-BW_CLICK_LIMIT_INTERVAL_MS=1000
-BW_CHROME_PROFILE=E:/code/bw_tickets/.chrome-profile
-BW_EDGE_PROFILE=E:/code/bw_tickets/.edge-profile
-BW_BROWSER_EXECUTABLE=
-BW_SUCCESS_URL=https://www.bilibili.com/video/BV1sa4y1H7ek
-```
-
-常用配置说明：
-
-| 配置 | 说明 |
-|---|---|
-| `BW_PROJECT_ID` | 活动 ID，对应详情页 URL 里的 `id` |
-| `BW_DAY_FLAG` | 目标日期索引，`0/1/2` 对应不同日期 |
-| `BW_CHECK_TICKET_INTERVAL_MS` | 查票接口轮询间隔，单位毫秒 |
-| `BW_CLICK_LIMIT_INTERVAL_MS` | 请求限制弹窗检查/点击间隔，单位毫秒 |
-| `BW_CHROME_PROFILE` | Chrome 专用持久化登录 profile |
-| `BW_EDGE_PROFILE` | Edge 专用持久化登录 profile |
-| `BW_BROWSER_EXECUTABLE` | 浏览器可执行文件路径；留空时自动检测，优先 Chrome，找不到再用 Edge |
-| `BW_SUCCESS_URL` | 进入支付页后打开的提醒 URL |
-| `BW_USER_AGENT` | 自定义 User-Agent，留空关闭 |
-| `BW_ACCEPT_LANGUAGE` | 自定义语言，留空关闭 |
-| `BW_HIDE_WEBDRIVER` | 设置为 `1` 时隐藏部分自动化特征，默认关闭 |
-
-不要把 `BW_CHROME_PROFILE` 或 `BW_EDGE_PROFILE` 指向日常使用的主浏览器 profile。建议一直使用项目专用 profile。
-
-## 4. 首次登录
+### 4. 初始化环境配置
 
 执行：
+
+```powershell
+pnpm run setenv
+```
+
+这一步会帮你生成并填写基础配置。大多数情况下直接跑完就可以。
+
+如果它提示失败，通常是没找到浏览器。打开 `.env`，把 `BW_BROWSER_EXECUTABLE` 填成你电脑上 Chrome 或 Edge 的绝对路径，例如，请严格注意把所有的路径分隔符"\"全部改成"/"：
+
+```dotenv
+BW_BROWSER_EXECUTABLE=C:/Program Files/Google/Chrome/Application/chrome.exe
+```
+
+Edge 一般是：
+
+```dotenv
+BW_BROWSER_EXECUTABLE=C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe
+```
+
+路径里有空格也不用加引号，直接填完整路径。
+
+### 5. 登录小破站
+
+打开命令行（Windows可以右键项目文件夹，点击“在终端中打开”），执行：
 
 ```powershell
 pnpm run login
 ```
 
-程序会打开浏览器并进入 Bilibili。请在打开的窗口里手动登录，最后关闭浏览器。
+注意，是 `pnpm run login`，不要输成 `pnpm login`。
 
-登录完成后，直接在终端按 `Ctrl+C` 结束登录模式。登录态会保存在 `.env` 中配置的 profile 目录里。
+脚本会打开浏览器。你在这个浏览器里登录小破站，登录时一定要勾选“长期登录”。不勾的话，后面很容易跑着跑着又变成未登录。
 
-## 5. 启动自动化
+登录完成后，把这个浏览器彻底退出。Windows 直接关掉浏览器窗口通常就够了；Mac 上还需要在下方 Dock 栏右键浏览器图标，然后点“退出”。
+
+退出后可以再执行一次：
+
+```powershell
+pnpm run login
+```
+
+如果打开后还是登录状态，说明登录信息已经保存好了。检查完同样要把浏览器彻底退出。
+
+### 6. 选择票种和开抢时间
+
+执行：
+
+```powershell
+pnpm run setindex
+```
+
+按提示选择要抢的票种和开始抢票的时间。这里一次只能选一种票；如果想改，重新执行一遍 `pnpm run setindex` 就行。
+
+强烈建议每次运行脚本前都先跑一遍 `pnpm run setindex`。这样能顺手确认票种、日期和开抢时间没有选错（每一轮开票之前都会变的）。
+
+### 7. 开始运行
 
 执行：
 
@@ -89,19 +121,11 @@ pnpm run login
 pnpm start
 ```
 
-启动后程序会：
+启动后，脚本会打开配置好的浏览器，进入对应活动页面并开始轮询。发现可售票后，它会继续走到确认订单页并提交订单。
 
-1. 打开配置的浏览器和持久化 profile。
-2. 进入 `BW_PROJECT_ID` 对应的详情页。
-3. 按 `BW_DAY_FLAG` 选择目标日期。
-4. 发现可售票后进入购买流程。
-5. 在确认订单页选择购票人并提交订单。
-6. 遇到请求限制弹窗时尝试关闭。
-7. 到达支付页后停止自动化，并打开 `BW_SUCCESS_URL` 提醒人工处理。
+到支付页后脚本会停下，并打开提醒 URL。**支付不会自动完成，需要你自己处理。我这里做的是跳转到指定视频，播放声音，请自行修改。**
 
-支付页不会继续自动支付。
-
-## 6. 重置统计
+## 重置统计
 
 统计文件写在：
 
@@ -126,6 +150,14 @@ pnpm reset-stats
 - `lastConfirmPage`
 
 ## FAQ
+
+### 运行时提示“[out] 正在现有的浏览器会话中打开。”怎么办？
+
+这通常说明上一次打开的浏览器没有彻底退出，或者还有别的抢票进程正在跑。
+
+先手动关闭 Chrome/Edge。Mac 用户注意，只点窗口左上角关闭不一定够，需要在 Dock 栏右键浏览器图标，然后点“退出”。
+
+如果关掉浏览器后还是提示这句话，就打开系统的任务管理器或活动监视器，结束残留的 Chrome/Edge 进程，以及还在运行的 `pnpm start`、`node` 抢票进程，然后再重新启动。
 
 ### 为什么启动的是 Edge？
 
