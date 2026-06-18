@@ -3,6 +3,7 @@ import { selectors } from '../selectors.js';
 import { fetchTicketStatus } from '../ticketApi.js';
 import { isClickableButton, isVisible, jitter, nowText, sleep } from '../utils.js';
 import { recordFound, recordLimitClick, updateStats } from '../storage.js';
+import { waitUntilAutomationStartTime } from '../automationStartTime.js';
 
 async function dispatchVisibilityChange(page) {
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
@@ -83,6 +84,7 @@ async function checkTicketsAndMaybeSubmit(page, context) {
 }
 
 export async function runConfirmOrderPage(page, context) {
+  await waitUntilAutomationStartTime('confirm');
   console.log('[confirm] running confirm-order automation');
   await updateStats(stats => ({ ...stats, lastConfirmPage: page.url() }));
 

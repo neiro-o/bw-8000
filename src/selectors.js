@@ -3,6 +3,7 @@ export const selectors = {
   screenRadioGroup: '.screen-container .radio-group',
   ticketRadioGroups: '.ticket-container .radio-group',
   detailBottomButton: '.bottom-bar .bili-button',
+  detailModalClose: '.bili-icon-modal-close',
   venueName: '.venue-name',
 
   buyerTag: '.buyer-list .buyer-tag',

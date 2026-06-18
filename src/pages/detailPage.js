@@ -3,41 +3,58 @@ import { selectors } from '../selectors.js';
 import { fetchTicketStatus } from '../ticketApi.js';
 import { isClickableButton, nowText, sleep } from '../utils.js';
 import { recordEnter, recordFound } from '../storage.js';
+import { waitUntilAutomationStartTime } from '../automationStartTime.js';
 
 async function dispatchVisibilityChange(page) {
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
 }
 
-async function clickTicketCategory(page) {
-  await page.locator(selectors.ticketRadioGroups).evaluateAll(groups => {
-    for (const group of groups) {
-      const labels = Array.from(group.children);
-      const lastActive = [...labels].reverse().find(label => label.classList.contains('active'));
-      const target = lastActive ?? labels.find(label => !label.classList.contains('disabled'));
-      if (target) target.click();
-    }
-  });
-}
-
 function forcePresaleStatus(body) {
   const presale = { number: 2, display_name: '预售中' };
+
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const todayDateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const todayMidnightStr = `${todayDateStr} 00:00:00`;
+  const todayMidnightSec = Math.floor(new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000);
+  // Negative: sale start appears to be today's midnight (already passed)
+  const countDown = todayMidnightSec - Math.floor(Date.now() / 1000);
+
+  // 1. Top-level project fields
+  if (body?.data) {
+    const d = body.data;
+    d.sale_flag_number = presale.number;
+    d.sale_flag = presale.display_name;
+    d.pre_sale = 0;
+    d.count_down = countDown;
+    d.bs_countDown = countDown;
+  }
+
   const screenList = body?.data?.screen_list;
   if (!Array.isArray(screenList)) return body;
 
   for (const screen of screenList) {
+    // 2. Screen-level fields
     screen.saleFlag = { ...presale };
     screen.sale_flag = { ...presale };
+    screen.sale_flag_number = presale.number;
+    screen.show_date = todayDateStr;
+    screen.clickable = true;
 
     if (!Array.isArray(screen.ticket_list)) continue;
     for (const ticket of screen.ticket_list) {
+      // Original 永久有票 logic preserved
       ticket.saleFlag = { ...presale };
       ticket.sale_flag = { ...presale };
       ticket.sale_flag_number = presale.number;
       ticket.clickable = true;
-      if (ticket.saleStart) ticket.saleStart = '2020-01-01 00:00:00';
-      if (ticket.saleEnd) ticket.saleEnd = '2099-01-01 00:00:00';
-      if (ticket.sale_start) ticket.sale_start = '2020-01-01 00:00:00';
-      if (ticket.sale_end) ticket.sale_end = '2099-01-01 00:00:00';
+      // saleStart → today midnight; saleEnd unchanged
+      ticket.saleStart = todayMidnightStr;
+      ticket.sale_start = todayMidnightStr;
+
+      // 3. Additional ticket fields per analysis
+      ticket.is_sale = 1;
+      ticket.num_type = 2;
     }
   }
 
@@ -86,33 +103,70 @@ async function updateVenueStatus(page, timeText, allSold) {
   }, `[${timeText}] ${config.dayFlag + 1}日 ${allSold ? '已售罄' : '暂时售罄'}`).catch(() => {});
 }
 
-async function openPage2(page) {
-  const radioGroup = page.locator(selectors.screenRadioGroup).first();
-  if (!(await radioGroup.count())) return false;
+async function runTicketStatusCheck(page, context) {
+  // Step A: Keep the former polling body as a reusable single-check helper.
+  const timeText = nowText();
+  try {
+    const status = await fetchTicketStatus(context.request, config.projectId, config.dayFlag);
+    if (status.found) {
+      console.warn(`[detail] [${timeText}] available ticket: ${status.available.map(item => item.desc).join(', ')}`);
+      await recordFound(timeText);
+      await openPurchasePage(page);
+    } else {
+      await updateVenueStatus(page, timeText, status.allSold);
+    }
+  } catch (error) {
+    console.error(`[detail] check ticket failed: ${error.message}`);
+  }
+}
 
+async function clickIndexedRadio(page, groupSelector, index, label) {
+  // Step B: Locate the radio group from the detail-page modal structure.
+  const radioGroup = page.locator(groupSelector).first();
+  if (!(await radioGroup.count())) {
+    console.warn(`[detail] ${label} radio group not found`);
+    return false;
+  }
+
+  // Step C: Treat the configured index as hard targeting; out of range fails fast.
   const children = radioGroup.locator(':scope > *');
-  if ((await children.count()) <= config.dayFlag) return false;
+  const count = await children.count();
+  if (index < 0 || index >= count) {
+    console.warn(`[detail] ${label} index ${index} out of range, total ${count}`);
+    return false;
+  }
 
-  await children.nth(config.dayFlag).click();
+  // Step D: Click the exact configured option from the matched group.
+  await children.nth(index).click();
+  return true;
+}
+
+async function openPage2(page) {
+  // Step 2.1: Select the target screen by BW_DAY_FLAG.
+  if (!(await clickIndexedRadio(page, selectors.screenRadioGroup, config.dayFlag, 'screen'))) return false;
+
+  // Step 2.2: Let the ticket list update after the screen selection.
   await sleep(45);
-  await clickTicketCategory(page);
 
+  // Step 2.3: Select the target ticket category by BW_TICKET_INDEX.
+  if (!(await clickIndexedRadio(page, selectors.ticketRadioGroups, config.ticketIndex, 'ticket'))) return false;
+
+  // Step 2.4: Submit the modal selection with the bottom action button.
   const bottomButton = page.locator(selectors.detailBottomButton).first();
   if (await isClickableButton(bottomButton)) {
     await bottomButton.click();
-    await recordEnter(nowText());
     return true;
   }
 
+  console.info('[detail] bottom button is not clickable yet');
   return false;
 }
 
 async function openPurchasePage(page) {
-  await dispatchVisibilityChange(page);
-  await sleep(100);
-
+  // Step 5.1: Reuse an already-open ticket modal when the previous attempt left it visible.
   const modalAlreadyOpen = await page.locator('.ticket-modal-container').isVisible().catch(() => false);
   if (!modalAlreadyOpen) {
+    // Step 5.2: Open the ticket modal from the detail-page buy button.
     const button = page.locator(selectors.detailBuyButton).first();
     if (!(await isClickableButton(button))) {
       console.info('[detail] buy button is not clickable yet');
@@ -123,86 +177,51 @@ async function openPurchasePage(page) {
     console.info('[detail] ticket modal already open, skipping buy button click');
   }
 
-  const entered = await Promise.race([
-    openPage2(page),
-    sleep(config.maxDetailReloadWaitMs).then(async () => {
-      console.warn('[detail] selection step timed out, reloading detail page');
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      return false;
-    })
-  ]);
-
-  return entered;
+  // Step 5.3: Select screen, ticket category, and click the modal submit button.
+  return openPage2(page);
 }
 
-function parseDetailStartTime(value, now = new Date()) {
-  const text = value.trim();
-  if (!text) return null;
-
-  const match = text.match(/^(\d{1,2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?$/);
-  if (!match) return null;
-
-  const [, hourText, minuteText, secondText, fractionText = ''] = match;
-  const hour = Number(hourText);
-  const minute = Number(minuteText);
-  const second = Number(secondText);
-  const millisecond = Number((fractionText + '000').slice(0, 3));
-
-  if (hour > 23 || minute > 59 || second > 59) return null;
-
-  const target = new Date(now);
-  target.setHours(hour, minute, second, millisecond);
-  return target;
+async function closeTicketModal(page) {
+  // Step 3.1: Close the modal before restarting from visibilitychange.
+  await page.locator(selectors.detailModalClose).first().click().catch(() => {});
 }
 
-async function waitUntilDetailStartTime() {
-  if (!config.detailStartTime.trim()) return;
+async function waitForDetailNavigation(page, previousUrl) {
+  // Step 3.2: After submitting, give the page 1.5s to leave the detail page.
+  await sleep(1500);
+  const currentUrl = page.url();
+  return currentUrl !== previousUrl && !currentUrl.startsWith('https://mall.bilibili.com/neul-next/ticket/detail.html');
+}
 
-  const target = parseDetailStartTime(config.detailStartTime);
-  if (!target) {
-    console.warn(`[detail] invalid BW_DETAIL_START_TIME: ${config.detailStartTime}`);
-    return;
+async function runPurchaseAttemptLoop(page) {
+  while (page.url().startsWith('https://mall.bilibili.com/neul-next/ticket/detail.html')) {
+    // Step 4: At start time, wake detail-page logic by dispatching visibilitychange instead of reloading.
+    await dispatchVisibilityChange(page);
+    await sleep(100);
+
+    const beforeSubmitUrl = page.url();
+    const submitted = await openPurchasePage(page);
+    if (!submitted) return false;
+
+    await recordEnter(nowText());
+    if (await waitForDetailNavigation(page, beforeSubmitUrl)) return true;
+
+    console.warn('[detail] still on detail page after submit, closing modal and retrying');
+    await closeTicketModal(page);
   }
 
-  let lastLogAt = 0;
-  while (Date.now() < target.getTime()) {
-    const remainingMs = target.getTime() - Date.now();
-    const now = Date.now();
-    if (now - lastLogAt >= 5000 || remainingMs <= 1000) {
-      console.log(`[detail] waiting for start time ${config.detailStartTime}, remaining ${(remainingMs / 1000).toFixed(1)}s`);
-      lastLogAt = now;
-    }
-    await sleep(Math.min(100, Math.max(1, remainingMs)));
-  }
+  return true;
 }
 
 export async function runDetailPage(page, context) {
+  await waitUntilAutomationStartTime('detail');
   console.log(`[detail] watching project ${config.projectId}, day flag ${config.dayFlag}`);
   const hook = await installDetailApiHook(page);
   console.log('[detail] installed detail-page ticket API hook');
 
   try {
-    await waitUntilDetailStartTime();
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    await openPurchasePage(page);
-
-    while (page.url().startsWith('https://mall.bilibili.com/neul-next/ticket/detail.html')) {
-      const timeText = nowText();
-      try {
-        const status = await fetchTicketStatus(context.request, config.projectId, config.dayFlag);
-        if (status.found) {
-          console.warn(`[detail] [${timeText}] available ticket: ${status.available.map(item => item.desc).join(', ')}`);
-          await recordFound(timeText);
-          await openPurchasePage(page);
-        } else {
-          await updateVenueStatus(page, timeText, status.allSold);
-        }
-      } catch (error) {
-        console.error(`[detail] check ticket failed: ${error.message}`);
-      }
-
-      await sleep(config.checkTicketIntervalMs);
-    }
+    // Step 4/5: Do a direct purchase-attempt flow; no detail-page polling loop here.
+    await runPurchaseAttemptLoop(page);
   } finally {
     await page.unroute(hook.pattern, hook.handler).catch(() => {});
     console.log('[detail] removed detail-page ticket API hook');

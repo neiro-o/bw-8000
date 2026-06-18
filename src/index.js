@@ -20,18 +20,30 @@ const { executable, browser } = resolveBrowserExecutableOrThrow(config.browserEx
 const userDataDir = browser === 'edge' ? config.edgeProfile : config.chromeProfile;
 console.log(`[browser] using ${browser} at ${executable}`);
 console.log(`[browser] profile: ${userDataDir}`);
-console.log(`[browser] size: ${config.browserWidth}x${config.browserHeight}`);
+
+const isLoginMode = args.has('--login');
+const useFullscreen = isLoginMode || config.browserFullscreen;
+
+if (!useFullscreen) {
+  console.log(`[browser] size: ${config.browserWidth}x${config.browserHeight}`);
+}
 
 const contextOptions = {
   executablePath: executable,
   headless: config.headless,
   ignoreDefaultArgs: ['--no-sandbox'],
-  viewport: {
+};
+
+if (!useFullscreen) {
+  contextOptions.viewport = {
     width: config.browserWidth,
     height: config.browserHeight
-  },
-  args: [`--window-size=${config.browserWidth},${config.browserHeight}`],
-};
+  };
+  contextOptions.args = [`--window-size=${config.browserWidth},${config.browserHeight}`];
+} else {
+  contextOptions.args = ['--start-maximized'];
+  console.log('[browser] using fullscreen mode');
+}
 if (config.userAgent) {
   contextOptions.userAgent = config.userAgent;
   console.log(`[browser] userAgent: ${config.userAgent}`);

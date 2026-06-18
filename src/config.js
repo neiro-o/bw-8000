@@ -1,6 +1,7 @@
 export const config = {
   projectId: Number(process.env.BW_PROJECT_ID ?? 102194),
   dayFlag: Number(process.env.BW_DAY_FLAG ?? 0),
+  ticketIndex: Number(process.env.BW_TICKET_INDEX ?? 0),
   clickLimitIntervalMs: Number(process.env.BW_CLICK_LIMIT_INTERVAL_MS ?? 285),
   checkTicketIntervalMs: Number(process.env.BW_CHECK_TICKET_INTERVAL_MS ?? 520),
   chromeProfile: process.env.BW_CHROME_PROFILE ?? 'E:/code/bw_tickets/.chrome-profile',
@@ -9,6 +10,7 @@ export const config = {
   headless: process.env.BW_HEADLESS === '1',
   browserWidth: Number(process.env.BW_BROWSER_WIDTH ?? 720),
   browserHeight: Number(process.env.BW_BROWSER_HEIGHT ?? 1080),
+  browserFullscreen: process.env.BW_BROWSER_FULLSCREEN === '1',
   detailStartTime: process.env.BW_DETAIL_START_TIME ?? '',
   maxDetailReloadWaitMs: Number(process.env.BW_DETAIL_RELOAD_WAIT_MS ?? 10000),
   submitWithoutTicketChance: Number(process.env.BW_SUBMIT_WITHOUT_TICKET_CHANCE ?? 0.26),
