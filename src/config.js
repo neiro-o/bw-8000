@@ -12,8 +12,6 @@ export const config = {
   browserHeight: Number(process.env.BW_BROWSER_HEIGHT ?? 1080),
   browserFullscreen: process.env.BW_BROWSER_FULLSCREEN === '1',
   detailStartTime: process.env.BW_DETAIL_START_TIME ?? '',
-  maxDetailReloadWaitMs: Number(process.env.BW_DETAIL_RELOAD_WAIT_MS ?? 10000),
-  submitWithoutTicketChance: Number(process.env.BW_SUBMIT_WITHOUT_TICKET_CHANCE ?? 0.26),
   successUrl: process.env.BW_SUCCESS_URL ?? 'https://www.bilibili.com/video/BV1sa4y1H7ek',
   userAgent: process.env.BW_USER_AGENT ?? '',
   hideWebdriver: process.env.BW_HIDE_WEBDRIVER === '1',

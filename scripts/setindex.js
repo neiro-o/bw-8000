@@ -239,8 +239,8 @@ function formatSgt(ms) {
 function noonSgtMs(offsetDays = 0) {
   const nowSgt = new Date(Date.now() + SGT_OFFSET_MS);
   const y = nowSgt.getUTCFullYear(), m = nowSgt.getUTCMonth(), d = nowSgt.getUTCDate();
-  // 12:00 SGT = 04:00 UTC on the same calendar day
-  return Date.UTC(y, m, d + offsetDays, 4, 0, 0, 0);
+  // 11:59:59 SGT = 03:59:59 UTC on the same calendar day
+  return Date.UTC(y, m, d + offsetDays, 3, 59, 59, 0);
 }
 
 const nowMs = Date.now();
@@ -250,9 +250,9 @@ const todayNoonPassed = nowMs >= todayNoonMs;
 
 const startOptions = [];
 startOptions.push({ label: '直接开始（立即抢票）', value: nowMs });
-startOptions.push({ label: `明天 12:00:00  →  ${formatSgt(tomorrowNoonMs)}`, value: tomorrowNoonMs });
+startOptions.push({ label: `明天 11:59:59  →  ${formatSgt(tomorrowNoonMs)}`, value: tomorrowNoonMs });
 if (!todayNoonPassed) {
-  startOptions.push({ label: `今天 12:00:00  →  ${formatSgt(todayNoonMs)}`, value: todayNoonMs });
+  startOptions.push({ label: `今天 11:59:59  →  ${formatSgt(todayNoonMs)}`, value: todayNoonMs });
 }
 startOptions.push({ label: '不修改（保留当前 BW_DETAIL_START_TIME）', value: null });
 
@@ -282,6 +282,31 @@ if (rawAnswer !== '') {
   console.log('\n未输入，开始时间不变。');
 }
 
+// ─── click interval settings ──────────────────────────────────────────────────
+
+async function askMs(question, defaultMs) {
+  while (true) {
+    const answer = (await prompt(rl, question)).trim();
+    if (answer === '') return defaultMs;
+    const n = parseInt(answer, 10);
+    if (!isNaN(n) && n > 0) return n;
+    console.log('  请输入正整数（毫秒），或直接 Enter 使用推荐值。');
+  }
+}
+
+console.log('\n═══════════════════════════════════════');
+console.log('  点击速度设置');
+console.log('═══════════════════════════════════════');
+
+const clickLimitMs = await askMs(
+  '限流按钮点击间隔（推荐 235ms，直接 Enter 使用推荐值）: ',
+  235
+);
+const checkTicketMs = await askMs(
+  '提交按钮点击间隔（推荐 400ms，直接 Enter 使用推荐值）: ',
+  400
+);
+
 rl.close();
 
 // ─── write .env ───────────────────────────────────────────────────────────────
@@ -297,14 +322,18 @@ envContent = setEnvKey(envContent, 'BW_TICKET_INDEX', ticketIndex);
 if (chosenStartTime !== null) {
   envContent = setEnvKey(envContent, 'BW_DETAIL_START_TIME', chosenStartTime);
 }
+envContent = setEnvKey(envContent, 'BW_CLICK_LIMIT_INTERVAL_MS', clickLimitMs);
+envContent = setEnvKey(envContent, 'BW_CHECK_TICKET_INTERVAL_MS', checkTicketMs);
 fs.writeFileSync(ENV_PATH, envContent, 'utf8');
 
 console.log(`\n[setindex] .env updated:`);
-console.log(`  BW_DAY_FLAG      = ${dayFlag}  (${chosenScreen.name})`);
-console.log(`  BW_TICKET_INDEX  = ${ticketIndex}  (${chosenTicket.desc})`);
+console.log(`  BW_DAY_FLAG               = ${dayFlag}  (${chosenScreen.name})`);
+console.log(`  BW_TICKET_INDEX           = ${ticketIndex}  (${chosenTicket.desc})`);
 if (chosenStartTime !== null) {
-  console.log(`  BW_DETAIL_START_TIME = ${chosenStartTime}  (${formatSgt(chosenStartTime)})`);
+  console.log(`  BW_DETAIL_START_TIME      = ${chosenStartTime}  (${formatSgt(chosenStartTime)})`);
 } else {
-  console.log(`  BW_DETAIL_START_TIME = 未修改`);
+  console.log(`  BW_DETAIL_START_TIME      = 未修改`);
 }
+console.log(`  BW_CLICK_LIMIT_INTERVAL_MS  = ${clickLimitMs}ms`);
+console.log(`  BW_CHECK_TICKET_INTERVAL_MS = ${checkTicketMs}ms`);
 console.log('\n配置完成！可以运行 pnpm start 开始抢票。');

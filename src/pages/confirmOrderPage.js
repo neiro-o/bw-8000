@@ -1,8 +1,7 @@
 import { config, detailUrl } from '../config.js';
 import { selectors } from '../selectors.js';
-import { fetchTicketStatus } from '../ticketApi.js';
 import { isClickableButton, isVisible, jitter, nowText, sleep } from '../utils.js';
-import { recordFound, recordLimitClick, updateStats } from '../storage.js';
+import { recordLimitClick, updateStats } from '../storage.js';
 import { waitUntilAutomationStartTime } from '../automationStartTime.js';
 
 async function dispatchVisibilityChange(page) {
@@ -67,38 +66,34 @@ async function selectBuyer(page) {
   }
 }
 
-async function checkTicketsAndMaybeSubmit(page, context) {
-  const timeText = nowText();
-  try {
-    const status = await fetchTicketStatus(context.request, config.projectId, config.dayFlag);
-    if (status.found) {
-      console.warn(`[confirm] [${timeText}] available ticket: ${status.available.map(item => item.desc).join(', ')}`);
-      await recordFound(timeText);
-      await simulateClick(page);
-    } else if (Math.random() < config.submitWithoutTicketChance) {
-      await simulateClick(page);
-    }
-  } catch (error) {
-    console.error(`[confirm] check ticket failed: ${error.message}`);
-  }
+function getSubmitLoopState(enteredAt) {
+  const elapsedMs = Date.now() - enteredAt;
+  const afterInitialWindow = elapsedMs >= 30000;
+
+  return {
+    shouldClick: !afterInitialWindow || Math.random() < 0.6,
+    intervalMs: afterInitialWindow ? config.checkTicketIntervalMs * 2 : config.checkTicketIntervalMs
+  };
 }
 
-export async function runConfirmOrderPage(page, context) {
+export async function runConfirmOrderPage(page) {
   await waitUntilAutomationStartTime('confirm');
   console.log('[confirm] running confirm-order automation');
   await updateStats(stats => ({ ...stats, lastConfirmPage: page.url() }));
 
+  const enteredAt = Date.now();
   void selectBuyer(page);
   const limitLoop = (async () => {
     while (page.url().startsWith('https://mall.bilibili.com/neul-next/ticket/confirmOrder.html')) {
       await checkAndClickLimit(page);
-      await sleep(config.clickLimitIntervalMs);
+      await sleep(Math.max(80, jitter(config.clickLimitIntervalMs, 65)));
     }
   })();
 
   while (page.url().startsWith('https://mall.bilibili.com/neul-next/ticket/confirmOrder.html')) {
-    await checkTicketsAndMaybeSubmit(page, context);
-    await sleep(Math.max(80, jitter(config.checkTicketIntervalMs, 65)));
+    const submitLoopState = getSubmitLoopState(enteredAt);
+    if (submitLoopState.shouldClick) await simulateClick(page);
+    await sleep(Math.max(80, jitter(submitLoopState.intervalMs, 65)));
   }
 
   await limitLoop.catch(error => {
