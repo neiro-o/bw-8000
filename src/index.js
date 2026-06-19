@@ -67,21 +67,6 @@ if (config.hideWebdriver) {
 
 const page = context.pages()[0] ?? await context.newPage();
 
-const BROWSER_LOG_IGNORE = [
-  /Refused to get unsafe header/,
-  /This is not supported in browser version of superagent/,
-  /bili-image/,
-  /bridge加载完成后依然未能支持该方法/,
-  /parser-blocking.*cross site/,
-];
-
-page.on('console', message => {
-  const text = message.text();
-  if (text && !BROWSER_LOG_IGNORE.some(p => p.test(text))) {
-    console.log(`[browser:${message.type()}] ${text}`);
-  }
-});
-
 page.on('pageerror', error => {
   console.error(`[browser:error] ${error.message}`);
 });
