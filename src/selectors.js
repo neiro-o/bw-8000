@@ -9,6 +9,8 @@ export const selectors = {
   venueName: '.venue-name',
 
   buyerTag: '.buyer-list .buyer-tag',
+  buyerTagName: '.buyer-list .buyer-tag .name',
+  buyerDetailContent: '.buyer-detail .content',
   personalId: '.personal-id',
   orderButton: '.order-button-area .bili-button',
   requestLimit: '#bili-request-limit',

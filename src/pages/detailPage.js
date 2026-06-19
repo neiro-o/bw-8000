@@ -58,7 +58,10 @@ function forcePresaleStatus(body) {
 
       // 3. Additional ticket fields per analysis
       ticket.is_sale = 1;
+      ticket.num = 4;
       ticket.num_type = 2;
+      ticket.less_vt = -1;
+      ticket.less_lv = -1;
     }
   }
 

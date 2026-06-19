@@ -1,7 +1,7 @@
 import { config, detailUrl } from '../config.js';
 import { selectors } from '../selectors.js';
 import { isClickableButton, isVisible, jitter, nowText, sleep } from '../utils.js';
-import { recordLimitClick, updateStats } from '../storage.js';
+import { readStats, recordLimitClick, updateStats } from '../storage.js';
 import { waitUntilAutomationStartTime } from '../automationStartTime.js';
 
 async function dispatchVisibilityChange(page) {
@@ -48,6 +48,33 @@ async function simulateClick(page) {
   return false;
 }
 
+async function updateBuyerInfoOverlay(page) {
+  const stats = await readStats();
+
+  await page.locator(selectors.buyerTagName).evaluateAll(elements => {
+    for (const element of elements) {
+      element.textContent = '已匿名';
+    }
+  }).catch(() => {});
+
+  await page.locator(selectors.buyerDetailContent).evaluateAll((elements, displayStats) => {
+    for (const element of elements) {
+      const [name, phone] = Array.from(element.children);
+      if (name) name.textContent = `限流点击：${displayStats.countClick}`;
+      if (phone) phone.textContent = `进入提交：${displayStats.countEnter}`;
+    }
+  }, {
+    countClick: stats.countClick,
+    countEnter: stats.countEnter
+  }).catch(() => {});
+
+  await page.locator(selectors.personalId).evaluateAll(elements => {
+    for (const element of elements) {
+      element.style.display = 'none';
+    }
+  }).catch(() => {});
+}
+
 async function selectBuyer(page) {
   while (page.url().startsWith('https://mall.bilibili.com/neul-next/ticket/confirmOrder.html')) {
     const buyerTag = page.locator(selectors.buyerTag).first();
@@ -55,14 +82,19 @@ async function selectBuyer(page) {
       await buyerTag.click();
       await dispatchVisibilityChange(page);
       await sleep(47);
-      await page.locator(selectors.personalId).evaluate(element => {
-        element.style.display = 'none';
-      }).catch(() => {});
+      await updateBuyerInfoOverlay(page);
       await simulateClick(page);
       return;
     }
 
     await sleep(60);
+  }
+}
+
+async function updateBuyerInfoOverlayLoop(page) {
+  while (page.url().startsWith('https://mall.bilibili.com/neul-next/ticket/confirmOrder.html')) {
+    await updateBuyerInfoOverlay(page);
+    await sleep(500);
   }
 }
 
@@ -77,6 +109,7 @@ function getSubmitLoopState(enteredAt) {
 }
 
 export async function runConfirmOrderPage(page) {
+  void updateBuyerInfoOverlayLoop(page);
   await waitUntilAutomationStartTime('confirm');
   console.log('[confirm] running confirm-order automation');
   await updateStats(stats => ({ ...stats, lastConfirmPage: page.url() }));
