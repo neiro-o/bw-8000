@@ -337,7 +337,12 @@ export async function runDetailPage(page, context) {
   await ensureDetailApiHook(page);
   console.log('[detail] installed detail-page ticket API hook');
 
-  await waitUntilAutomationStartTime('detail');
+  const stillOnDetailPage = await waitUntilAutomationStartTime(
+    'detail',
+    () => page.url().startsWith('https://mall.bilibili.com/neul-next/ticket/detail.html')
+  );
+  if (!stillOnDetailPage) return;
+
   // Step 4/5: Do a direct purchase-attempt flow; no detail-page polling loop here.
   await runPurchaseAttemptLoop(page);
 }

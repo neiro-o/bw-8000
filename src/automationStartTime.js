@@ -13,17 +13,19 @@ export function parseAutomationStartTimestamp(value) {
   return timestamp;
 }
 
-export async function waitUntilAutomationStartTime(label) {
-  if (!config.detailStartTime.trim()) return;
+export async function waitUntilAutomationStartTime(label, shouldContinue = () => true) {
+  if (!config.detailStartTime.trim()) return true;
 
   const targetTimestamp = parseAutomationStartTimestamp(config.detailStartTime);
   if (targetTimestamp === null) {
     console.warn(`[${label}] invalid BW_DETAIL_START_TIME timestamp: ${config.detailStartTime}`);
-    return;
+    return true;
   }
 
   let lastLogAt = 0;
   while (Date.now() < targetTimestamp) {
+    if (!shouldContinue()) return false;
+
     const remainingMs = targetTimestamp - Date.now();
     const now = Date.now();
     if (now - lastLogAt >= 60000 || remainingMs <= 1000) {
@@ -32,4 +34,6 @@ export async function waitUntilAutomationStartTime(label) {
     }
     await sleep(Math.min(100, Math.max(1, remainingMs)));
   }
+
+  return shouldContinue();
 }
