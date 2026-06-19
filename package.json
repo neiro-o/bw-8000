@@ -9,9 +9,11 @@
     "setindex": "node --env-file=.env scripts/setindex.js",
     "start": "node --env-file=.env src/index.js",
     "login": "node --env-file=.env src/index.js --login",
-    "reset-stats": "node --env-file=.env src/index.js --reset-stats"
+    "reset-stats": "node --env-file=.env src/index.js --reset-stats",
+    "feishutest": "node --env-file=.env scripts/feishutest.js"
   },
   "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.67.0",
     "playwright": "^1.56.0"
   },
   "engines": {

@@ -16,6 +16,11 @@ export const config = {
   userAgent: process.env.BW_USER_AGENT ?? '',
   hideWebdriver: process.env.BW_HIDE_WEBDRIVER === '1',
   acceptLanguage: process.env.BW_ACCEPT_LANGUAGE ?? '',
+  feishuEnabled: process.env.FEISHU_ENABLED === '1',
+  feishuAppId: process.env.FEISHU_APP_ID ?? '',
+  feishuAppSecret: process.env.FEISHU_APP_SECRET ?? '',
+  feishuReceiveId: process.env.FEISHU_RECEIVE_ID ?? '',
+  feishuReceiveIdType: process.env.FEISHU_RECEIVE_ID_TYPE ?? 'chat_id',
 };
 
 export function detailUrl(projectId = config.projectId) {

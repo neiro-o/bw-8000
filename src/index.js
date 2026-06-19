@@ -5,13 +5,46 @@ import { runConfirmOrderPage } from './pages/confirmOrderPage.js';
 import { ensureDetailApiHook, runDetailPage } from './pages/detailPage.js';
 import { runPaymentPage } from './pages/paymentPage.js';
 import { sleep } from './utils.js';
+import { closeFeishu, sendExitNotice, sendText } from './feishu/index.js';
 
 const args = new Set(process.argv.slice(2));
+
+let exiting = false;
+async function shutdown(reason, exitCode = 0) {
+  if (exiting) return;
+  exiting = true;
+  console.log(`[app] exiting: ${reason}`);
+  await Promise.race([
+    sendExitNotice(reason),
+    new Promise(resolve => setTimeout(resolve, 5000)),
+  ]).catch(error => console.error(`[feishu] exit notice failed: ${error.message}`));
+  await Promise.race([
+    closeFeishu(),
+    new Promise(resolve => setTimeout(resolve, 1000)),
+  ]).catch(() => {});
+  process.exit(exitCode);
+}
+
+process.once('SIGINT', () => void shutdown('收到 SIGINT', 130));
+process.once('SIGTERM', () => void shutdown('收到 SIGTERM', 143));
+process.once('SIGHUP', () => void shutdown('收到 SIGHUP', 129));
+process.once('beforeExit', code => void shutdown(`事件循环结束（code=${code}）`, code));
+process.once('uncaughtException', error => {
+  console.error(error);
+  void shutdown(`未捕获异常：${error.message}`, 1);
+});
+process.once('unhandledRejection', reason => {
+  console.error(reason);
+  const message = reason instanceof Error ? reason.message : String(reason);
+  void shutdown(`未处理的 Promise：${message}`, 1);
+});
+
+void sendText('✅ BW 抢票应用已启动');
 
 if (args.has('--reset-stats')) {
   await resetStats();
   console.log('stats reset');
-  process.exit(0);
+  await shutdown('统计数据已重置');
 }
 
 const { chromium } = await import('playwright');
@@ -73,7 +106,7 @@ page.on('pageerror', error => {
 
 context.on('close', () => {
   console.log('[browser] browser closed, exiting.');
-  process.exit(0);
+  void shutdown('浏览器已关闭');
 });
 
 if (args.has('--login')) {
