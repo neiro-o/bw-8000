@@ -1,7 +1,7 @@
 import { config } from '../config.js';
 import { selectors } from '../selectors.js';
 import { fetchTicketStatus } from '../ticketApi.js';
-import { isClickableButton, nowText, sleep } from '../utils.js';
+import { isClickableButton, isVisible, nowText, sleep } from '../utils.js';
 import { recordEnter, recordFound } from '../storage.js';
 import { waitUntilAutomationStartTime } from '../automationStartTime.js';
 
@@ -25,9 +25,13 @@ function forcePresaleStatus(body) {
     const d = body.data;
     d.sale_flag_number = presale.number;
     d.sale_flag = presale.display_name;
+    d.canClick = true;
     d.pre_sale = 0;
     d.count_down = countDown;
     d.bs_countDown = countDown;
+    if (Array.isArray(d.sales_dates)) {
+      d.sales_dates = d.sales_dates.map(item => ({ date: item.date }));
+    }
   }
 
   const screenList = body?.data?.screen_list;
@@ -61,7 +65,7 @@ function forcePresaleStatus(body) {
   return body;
 }
 
-async function installDetailApiHook(page) {
+async function installDetailApiHook(context) {
   const pattern = '**/api/ticket/project/getV2?**';
   const handler = async route => {
     const url = new URL(route.request().url());
@@ -87,16 +91,20 @@ async function installDetailApiHook(page) {
     }
   };
 
-  await page.route(pattern, handler);
+  await context.route(pattern, handler);
   return { pattern, handler };
 }
 
-export async function ensureDetailApiHook(page) {
-  // Install once per detail-page visit so getV2 can be intercepted before navigation starts.
-  if (!page.__bwDetailApiHook) {
-    page.__bwDetailApiHook = await installDetailApiHook(page);
+export async function ensureDetailApiHook(pageOrContext) {
+  const context = typeof pageOrContext.context === 'function'
+    ? pageOrContext.context()
+    : pageOrContext;
+
+  // Install once on the browser context so repeated detail getV2 calls keep being intercepted.
+  if (!context.__bwDetailApiHook) {
+    context.__bwDetailApiHook = await installDetailApiHook(context);
   }
-  return page.__bwDetailApiHook;
+  return context.__bwDetailApiHook;
 }
 
 async function updateVenueStatus(page, timeText, allSold) {
@@ -139,9 +147,36 @@ async function clickIndexedRadio(page, groupSelector, index, label) {
     return false;
   }
 
-  // Step D: Click the exact configured option from the matched group.
-  await children.nth(index).click();
-  return true;
+  // Step D: Click the exact configured option only when the page says it is usable.
+  const option = children.nth(index);
+  const state = await option.evaluate(el => ({
+    text: el.textContent?.replace(/\s+/g, ' ').trim() ?? '',
+    className: el.className ?? '',
+    ariaDisabled: el.getAttribute('aria-disabled'),
+    disabled: Boolean(el.disabled),
+  })).catch(() => null);
+
+  if (!state) {
+    console.warn(`[detail] ${label} index ${index} disappeared before click`);
+    return false;
+  }
+
+  const disabled = state.disabled ||
+    state.ariaDisabled === 'true' ||
+    /\b(is-)?disabled\b/.test(String(state.className));
+  if (disabled || !(await option.isEnabled().catch(() => false))) {
+    const suffix = state.text ? ` (${state.text})` : '';
+    console.warn(`[detail] ${label} index ${index}${suffix} is disabled, skip this attempt`);
+    return false;
+  }
+
+  try {
+    await option.click({ timeout: 1000 });
+    return true;
+  } catch (error) {
+    console.warn(`[detail] ${label} index ${index} click failed: ${error.message}`);
+    return false;
+  }
 }
 
 async function openPage2(page) {
@@ -162,6 +197,28 @@ async function openPage2(page) {
   return false;
 }
 
+async function clickDetailPopupSelectButton(page) {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const popup = page.locator(selectors.detailPopupContainer).first();
+    if (await isVisible(popup)) {
+      const selectButton = page.locator(selectors.detailPopupSelectButton).first();
+      if (await isClickableButton(selectButton)) {
+        await selectButton.click();
+        console.log('[detail] clicked popup select button');
+        await sleep(45);
+        return true;
+      }
+
+      console.info('[detail] popup select button is not clickable yet');
+      return false;
+    }
+
+    await sleep(50);
+  }
+
+  return true;
+}
+
 async function openPurchasePage(page) {
   // Step 5.1: Reuse an already-open ticket modal when the previous attempt left it visible.
   const modalAlreadyOpen = await page.locator('.ticket-modal-container').isVisible().catch(() => false);
@@ -177,7 +234,10 @@ async function openPurchasePage(page) {
     console.info('[detail] ticket modal already open, skipping buy button click');
   }
 
-  // Step 5.3: Select screen, ticket category, and click the modal submit button.
+  // Step 5.3: Handle the intermediate popup before selecting screen and ticket category.
+  if (!(await clickDetailPopupSelectButton(page))) return false;
+
+  // Step 5.4: Select screen, ticket category, and click the modal submit button.
   return openPage2(page);
 }
 
@@ -252,7 +312,12 @@ async function runPurchaseAttemptLoop(page) {
 
     const beforeSubmitUrl = page.url();
     const submitted = await openPurchasePage(page);
-    if (!submitted) return false;
+    if (!submitted) {
+      console.info('[detail] purchase modal is not ready, retrying without exiting');
+      await closeTicketModal(page);
+      await sleep(500 + Math.floor(Math.random() * 501));
+      continue;
+    }
 
     if (await clickBottomButtonUntilNavigationOrDisabled(page, beforeSubmitUrl)) return true;
 

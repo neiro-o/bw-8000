@@ -4,6 +4,8 @@ export const selectors = {
   ticketRadioGroups: '.ticket-container .radio-group',
   detailBottomButton: '.bottom-bar .bili-button',
   detailModalClose: '.bili-icon-modal-close',
+  detailPopupContainer: '.popup-container',
+  detailPopupSelectButton: '.popup-container .select-btn',
   venueName: '.venue-name',
 
   buyerTag: '.buyer-list .buyer-tag',
