@@ -1,13 +1,31 @@
 import { config } from '../config.js';
 import { selectors } from '../selectors.js';
-import { fetchTicketStatus } from '../ticketApi.js';
 import { isClickableButton, isVisible, nowText, sleep } from '../utils.js';
-import { recordEnter, recordFound } from '../storage.js';
+import { recordEnter } from '../storage.js';
 import { waitUntilAutomationStartTime } from '../automationStartTime.js';
 import { sendText, sendTextOnce } from '../feishu/index.js';
 
 async function dispatchVisibilityChange(page) {
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+}
+
+async function clickDetailRequestLimitButton(page) {
+  const button = page.locator(selectors.detailRequestLimitButton).first();
+  if (!(await isClickableButton(button))) return;
+
+  await button.click({ timeout: 2000 }).catch(error => {
+    console.warn(`[detail] request-limit button click failed: ${error.message}`);
+  });
+  console.log('[detail] clicked request-limit button');
+}
+
+async function runDetailRequestLimitLoop(page) {
+  while (page.url().startsWith('https://mall.bilibili.com/neul-next/ticket/detail.html')) {
+    await clickDetailRequestLimitButton(page).catch(error => {
+      console.warn(`[detail] request-limit button click failed: ${error.message}`);
+    });
+    await sleep(100);
+  }
 }
 
 function forcePresaleStatus(body) {
@@ -92,6 +110,17 @@ async function installDetailApiHook(context) {
     } catch (error) {
       console.error(`[detail] API hook failed: ${error.message}`);
       await route.continue();
+      // Wait, then dispatch visibilitychange so the page re-issues the API call and the hook gets another chance.
+      await sleep(400);
+      const detailPage = context.pages().find(p =>
+        p.url().startsWith('https://mall.bilibili.com/neul-next/ticket/detail.html')
+      );
+      if (detailPage) {
+        await detailPage.evaluate(() =>
+          document.dispatchEvent(new Event('visibilitychange'))
+        ).catch(() => {});
+        console.log('[detail] dispatched visibilitychange after hook failure to retry');
+      }
     }
   };
 
@@ -111,29 +140,7 @@ export async function ensureDetailApiHook(pageOrContext) {
   return context.__bwDetailApiHook;
 }
 
-async function updateVenueStatus(page, timeText, allSold) {
-  await page.locator(selectors.venueName).evaluate((venue, text) => {
-    const firstChild = venue.firstElementChild;
-    if (firstChild) firstChild.textContent = text;
-  }, `[${timeText}] ${config.dayFlag + 1}日 ${allSold ? '已售罄' : '暂时售罄'}`).catch(() => {});
-}
 
-async function runTicketStatusCheck(page, context) {
-  // Step A: Keep the former polling body as a reusable single-check helper.
-  const timeText = nowText();
-  try {
-    const status = await fetchTicketStatus(context.request, config.projectId, config.dayFlag);
-    if (status.found) {
-      console.warn(`[detail] [${timeText}] available ticket: ${status.available.map(item => item.desc).join(', ')}`);
-      await recordFound(timeText);
-      await openPurchasePage(page);
-    } else {
-      await updateVenueStatus(page, timeText, status.allSold);
-    }
-  } catch (error) {
-    console.error(`[detail] check ticket failed: ${error.message}`);
-  }
-}
 
 async function clickIndexedRadio(page, groupSelector, index, label) {
   // Step B: Locate the radio group from the detail-page modal structure.
@@ -143,16 +150,26 @@ async function clickIndexedRadio(page, groupSelector, index, label) {
     return false;
   }
 
-  // Step C: Treat the configured index as hard targeting; out of range fails fast.
+  // Step C: Resolve the target index. When the configured index is out of range (e.g. the ticket
+  // list shrank), warn and fall back to the last available option instead of failing.
   const children = radioGroup.locator(':scope > *');
   const count = await children.count();
-  if (index < 0 || index >= count) {
-    console.warn(`[detail] ${label} index ${index} out of range, total ${count}`);
+  if (count <= 0) {
+    console.warn(`[detail] ${label} has no options`);
     return false;
   }
 
-  // Step D: Click the exact configured option only when the page says it is usable.
-  const option = children.nth(index);
+  let targetIndex = index;
+  if (targetIndex < 0) {
+    console.warn(`[detail] ${label} index ${index} < 0, falling back to first option`);
+    targetIndex = 0;
+  } else if (targetIndex >= count) {
+    targetIndex = count - 1;
+    console.warn(`[detail] ${label} index ${index} out of range (total ${count}), falling back to last option ${targetIndex}`);
+  }
+
+  // Step D: Click the resolved option only when the page says it is usable.
+  const option = children.nth(targetIndex);
   const state = await option.evaluate(el => ({
     text: el.textContent?.replace(/\s+/g, ' ').trim() ?? '',
     className: el.className ?? '',
@@ -161,16 +178,18 @@ async function clickIndexedRadio(page, groupSelector, index, label) {
   })).catch(() => null);
 
   if (!state) {
-    console.warn(`[detail] ${label} index ${index} disappeared before click`);
+    console.warn(`[detail] ${label} index ${targetIndex} disappeared before click`);
     return false;
   }
 
+  const classTokens = String(state.className).split(/\s+/).filter(Boolean);
+  const hasDisabledClass = classTokens.includes('disabled') || classTokens.includes('is-disabled');
   const disabled = state.disabled ||
     state.ariaDisabled === 'true' ||
-    /\b(is-)?disabled\b/.test(String(state.className));
+    hasDisabledClass;
   if (disabled || !(await option.isEnabled().catch(() => false))) {
     const suffix = state.text ? ` (${state.text})` : '';
-    console.warn(`[detail] ${label} index ${index}${suffix} is disabled, skip this attempt`);
+    console.warn(`[detail] ${label} index ${targetIndex}${suffix} is disabled, skip this attempt`);
     return false;
   }
 
@@ -178,9 +197,56 @@ async function clickIndexedRadio(page, groupSelector, index, label) {
     await option.click({ timeout: 1000 });
     return true;
   } catch (error) {
-    console.warn(`[detail] ${label} index ${index} click failed: ${error.message}`);
+    console.warn(`[detail] ${label} index ${targetIndex} click failed: ${error.message}`);
     return false;
   }
+}
+
+async function setTicketQuantity(page) {
+  if (config.ticketQuantity === 1) return true;
+
+  const quantitySelect = page.locator(selectors.detailQuantitySelect).first();
+  try {
+    await quantitySelect.locator('.number').waitFor({ state: 'visible', timeout: 2000 });
+  } catch {
+    console.warn('[detail] quantity selector did not appear after ticket selection');
+    return false;
+  }
+
+  // Re-read the displayed number after every click: the site may enforce a per-ticket limit.
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const number = Number.parseInt(
+      (await quantitySelect.locator('.number').textContent().catch(() => ''))?.trim() ?? '',
+      10
+    );
+    if (!Number.isInteger(number)) {
+      console.warn('[detail] could not read the selected ticket quantity');
+      return false;
+    }
+    if (number === config.ticketQuantity) {
+      console.info(`[detail] ticket quantity set to ${number}`);
+      return true;
+    }
+
+    const direction = number < config.ticketQuantity ? 'plus' : 'minus';
+    const button = quantitySelect.locator(`.button.${direction}`).first();
+    const className = await button.getAttribute('class').catch(() => '');
+    if (!(await button.count()) || className?.split(/\s+/).includes('disable')) {
+      console.warn(`[detail] cannot change ticket quantity from ${number} to ${config.ticketQuantity}: ${direction} button is disabled`);
+      return false;
+    }
+
+    try {
+      await button.click({ timeout: 1000 });
+    } catch (error) {
+      console.warn(`[detail] ${direction} quantity click failed: ${error.message}`);
+      return false;
+    }
+    await sleep(45);
+  }
+
+  console.warn(`[detail] failed to set ticket quantity to ${config.ticketQuantity}`);
+  return false;
 }
 
 async function openPage2(page) {
@@ -193,7 +259,11 @@ async function openPage2(page) {
   // Step 2.3: Select the target ticket category by BW_TICKET_INDEX.
   if (!(await clickIndexedRadio(page, selectors.ticketRadioGroups, config.ticketIndex, 'ticket'))) return false;
 
-  // Step 2.4: Confirm the bottom action button exists before the click loop handles submission.
+  // Step 2.4: Ticket quantity controls only appear after a ticket category is selected.
+  // Run this on every selection so a reopened/reset modal is calibrated again.
+  if (!(await setTicketQuantity(page))) return false;
+
+  // Step 2.5: Confirm the bottom action button exists before the click loop handles submission.
   const bottomButton = page.locator(selectors.detailBottomButton).first();
   if (await bottomButton.count()) return true;
 
@@ -207,7 +277,9 @@ async function clickDetailPopupSelectButton(page) {
     if (await isVisible(popup)) {
       const selectButton = page.locator(selectors.detailPopupSelectButton).first();
       if (await isClickableButton(selectButton)) {
-        await selectButton.click();
+        await selectButton.click({ timeout: 2000 }).catch(error => {
+          console.warn(`[detail] popup select button click failed: ${error.message}`);
+        });
         console.log('[detail] clicked popup select button');
         await sleep(45);
         return true;
@@ -223,35 +295,11 @@ async function clickDetailPopupSelectButton(page) {
   return true;
 }
 
-async function openPurchasePage(page) {
-  // Step 5.1: Reuse an already-open ticket modal when the previous attempt left it visible.
-  const modalAlreadyOpen = await page.locator('.ticket-modal-container').isVisible().catch(() => false);
-  if (!modalAlreadyOpen) {
-    // Step 5.2: Open the ticket modal from the detail-page buy button.
-    const button = page.locator(selectors.detailBuyButton).first();
-    if (!(await isClickableButton(button))) {
-      console.info('[detail] buy button is not clickable yet');
-      return false;
-    }
-    await button.click();
-  } else {
-    console.info('[detail] ticket modal already open, skipping buy button click');
-  }
-
-  // Step 5.3: Handle the intermediate popup before selecting screen and ticket category.
-  if (!(await clickDetailPopupSelectButton(page))) return false;
-
-  // Step 5.4: Select screen, ticket category, and click the modal submit button.
-  return openPage2(page);
-}
-
 async function closeTicketModal(page) {
-  // Step 3.1: Close the modal before restarting from visibilitychange.
-  await page.locator(selectors.detailModalClose).first().click().catch(() => {});
+  await page.locator(selectors.detailModalClose).first().click({ timeout: 2000 }).catch(() => {});
 }
 
 async function isBottomButtonDisabled(button) {
-  // Step 3.2: Use the button class as the restart signal requested by the page markup.
   const className = await button.getAttribute('class').catch(() => '');
   return className?.includes('is-disabled') ?? false;
 }
@@ -261,72 +309,90 @@ function hasLeftDetailPage(page, previousUrl) {
   return currentUrl !== previousUrl && !currentUrl.startsWith('https://mall.bilibili.com/neul-next/ticket/detail.html');
 }
 
-async function waitForOriginalRestartWindow(page, previousUrl) {
-  // Step 3.3: Preserve the old 1.5s observation only after the button reports is-disabled.
-  await sleep(1500);
-  return hasLeftDetailPage(page, previousUrl);
-}
-
-async function clickBottomButtonUntilNavigationOrDisabled(page, previousUrl) {
-  const bottomButton = page.locator(selectors.detailBottomButton).first();
-
-  if (!(await bottomButton.count())) {
-    console.info('[detail] bottom button not found, restarting selection flow');
-    return false;
-  }
-
-  // Step 3.4: Click once first, then inspect whether the button turned disabled.
-  await bottomButton.click().catch(error => {
-    console.warn(`[detail] first bottom button click failed: ${error.message}`);
-  });
-  await recordEnter(nowText());
-
-  if (hasLeftDetailPage(page, previousUrl)) return true;
-
-  if (await isBottomButtonDisabled(bottomButton)) {
-    console.info('[detail] bottom button disabled after first click, waiting original 1.5s window');
-    return waitForOriginalRestartWindow(page, previousUrl);
-  }
-
-  while (page.url().startsWith('https://mall.bilibili.com/neul-next/ticket/detail.html')) {
-    // Step 3.5: If the submit button becomes disabled later, use the same original 1.5s window.
-    if (!(await bottomButton.count()) || await isBottomButtonDisabled(bottomButton)) {
-      console.info('[detail] bottom button is disabled, waiting original 1.5s window');
-      return waitForOriginalRestartWindow(page, previousUrl);
-    }
-
-    // Step 3.6: While enabled, keep clicking the submit button at a random 0.5-1.0s interval.
-    await bottomButton.click().catch(error => {
-      console.warn(`[detail] bottom button click failed: ${error.message}`);
-    });
-
-    await sleep(500 + Math.floor(Math.random() * 501));
-
-    if (hasLeftDetailPage(page, previousUrl)) return true;
-  }
-
-  return true;
-}
+// How long the submit button may stay disabled (after ticket selection) before we give up and
+// close the modal to start fresh.
+const BOTTOM_BUTTON_MAX_DISABLED_MS = 6000;
 
 async function runPurchaseAttemptLoop(page) {
-  while (page.url().startsWith('https://mall.bilibili.com/neul-next/ticket/detail.html')) {
-    // Step 4: At start time, wake detail-page logic by dispatching visibilitychange instead of reloading.
-    await dispatchVisibilityChange(page);
-    await sleep(100);
+  const detailPrefix = 'https://mall.bilibili.com/neul-next/ticket/detail.html';
 
-    const beforeSubmitUrl = page.url();
-    const submitted = await openPurchasePage(page);
-    if (!submitted) {
-      console.info('[detail] purchase modal is not ready, retrying without exiting');
-      await closeTicketModal(page);
-      await sleep(500 + Math.floor(Math.random() * 501));
+  // Track whether we have already selected screen+ticket in the current modal session so we
+  // don't re-click the radio buttons while waiting for the server to process the submission.
+  let ticketSelected = false;
+  let disabledSince = null;
+
+  while (page.url().startsWith(detailPrefix)) {
+    const previousUrl = page.url();
+
+    // --- Branch A: ticket selection modal is open ---
+    const bottomButton = page.locator(selectors.detailBottomButton).first();
+    const modalOpen =
+      await isVisible(page.locator('.ticket-modal-container').first()) ||
+      await isVisible(bottomButton);
+
+    if (modalOpen) {
+      // A1: Handle the intermediate venue-select popup if it appears.
+      if (!(await clickDetailPopupSelectButton(page))) {
+        await sleep(100);
+        continue;
+      }
+
+      // A2: Submit button enabled → click it.
+      if (!(await isBottomButtonDisabled(bottomButton))) {
+        disabledSince = null;
+        await bottomButton.click({ timeout: 2000 }).catch(error => {
+          console.warn(`[detail] bottom button click failed: ${error.message}`);
+        });
+        await recordEnter(nowText());
+        if (hasLeftDetailPage(page, previousUrl)) return true;
+        await sleep(500 + Math.floor(Math.random() * 501));
+        continue;
+      }
+
+      // A3: Submit button disabled.
+      if (!disabledSince) disabledSince = Date.now();
+
+      if (Date.now() - disabledSince >= BOTTOM_BUTTON_MAX_DISABLED_MS) {
+        // Gave up waiting — close modal and start over.
+        console.warn('[detail] submit button disabled too long, closing modal and retrying');
+        disabledSince = null;
+        ticketSelected = false;
+        await closeTicketModal(page);
+        await sleep(300);
+        continue;
+      }
+
+      // A4: Not yet timed out — try selecting screen+ticket if not done yet.
+      if (!ticketSelected) {
+        const ok = await openPage2(page);
+        if (ok) {
+          ticketSelected = true;
+          console.info('[detail] screen and ticket selected, waiting for submit button to enable');
+        }
+      }
+
+      await sleep(100);
       continue;
     }
 
-    if (await clickBottomButtonUntilNavigationOrDisabled(page, beforeSubmitUrl)) return true;
+    // Modal closed/not open → reset per-modal state.
+    ticketSelected = false;
+    disabledSince = null;
 
-    console.warn('[detail] restarting after disabled bottom button');
-    await closeTicketModal(page);
+    // --- Branch B: try to open the modal via the outer buy button ---
+    const buyButton = page.locator(selectors.detailBuyButton).first();
+    if (await isClickableButton(buyButton)) {
+      await buyButton.click({ timeout: 2000 }).catch(error => {
+        console.warn(`[detail] buy button click failed: ${error.message}`);
+      });
+      await sleep(100);
+      continue;
+    }
+
+    // --- Branch C: outer button not clickable → refresh page state via visibilitychange ---
+    console.info('[detail] buy button not clickable, refreshing via visibilitychange');
+    await dispatchVisibilityChange(page);
+    await sleep(300);
   }
 
   return true;
@@ -345,6 +411,8 @@ export async function runDetailPage(page, context) {
   );
   if (!stillOnDetailPage) return;
   void sendTextOnce('ticketing-started', `🚀 抢票开始\n项目 ID：${config.projectId}`);
+
+  void runDetailRequestLimitLoop(page);
 
   // Step 4/5: Do a direct purchase-attempt flow; no detail-page polling loop here.
   await runPurchaseAttemptLoop(page);

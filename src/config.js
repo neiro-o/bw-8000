@@ -2,6 +2,7 @@ export const config = {
   projectId: Number(process.env.BW_PROJECT_ID ?? 102194),
   dayFlag: Number(process.env.BW_DAY_FLAG ?? 0),
   ticketIndex: Number(process.env.BW_TICKET_INDEX ?? 0),
+  ticketQuantity: Math.max(1, Math.trunc(Number(process.env.BW_TICKET_QUANTITY ?? 1)) || 1),
   clickLimitIntervalMs: Number(process.env.BW_CLICK_LIMIT_INTERVAL_MS ?? 285),
   checkTicketIntervalMs: Number(process.env.BW_CHECK_TICKET_INTERVAL_MS ?? 520),
   chromeProfile: process.env.BW_CHROME_PROFILE ?? 'E:/code/bw_tickets/.chrome-profile',

@@ -243,16 +243,30 @@ function noonSgtMs(offsetDays = 0) {
   return Date.UTC(y, m, d + offsetDays, 3, 59, 59, 0);
 }
 
+function eveningSgtMs(offsetDays = 0) {
+  const nowSgt = new Date(Date.now() + SGT_OFFSET_MS);
+  const y = nowSgt.getUTCFullYear(), m = nowSgt.getUTCMonth(), d = nowSgt.getUTCDate();
+  // 17:59:57.5 SGT = 09:59:57.500 UTC on the same calendar day
+  return Date.UTC(y, m, d + offsetDays, 9, 59, 57, 500);
+}
+
 const nowMs = Date.now();
 const todayNoonMs = noonSgtMs(0);
 const tomorrowNoonMs = noonSgtMs(1);
+const todayEveningMs = eveningSgtMs(0);
+const tomorrowEveningMs = eveningSgtMs(1);
 const todayNoonPassed = nowMs >= todayNoonMs;
+const todayEveningPassed = nowMs >= todayEveningMs;
 
 const startOptions = [];
 startOptions.push({ label: '直接开始（立即抢票）', value: nowMs });
 startOptions.push({ label: `明天 11:59:59  →  ${formatSgt(tomorrowNoonMs)}`, value: tomorrowNoonMs });
+startOptions.push({ label: `明天 17:59:57.5  →  ${formatSgt(tomorrowEveningMs)}`, value: tomorrowEveningMs });
 if (!todayNoonPassed) {
   startOptions.push({ label: `今天 11:59:59  →  ${formatSgt(todayNoonMs)}`, value: todayNoonMs });
+}
+if (!todayEveningPassed) {
+  startOptions.push({ label: `今晚 17:59:57.5  →  ${formatSgt(todayEveningMs)}`, value: todayEveningMs });
 }
 startOptions.push({ label: '不修改（保留当前 BW_DETAIL_START_TIME）', value: null });
 
@@ -307,6 +321,32 @@ const checkTicketMs = await askMs(
   400
 );
 
+// ─── ticket quantity ──────────────────────────────────────────────────────────
+
+async function askPositiveInt(question, defaultVal) {
+  while (true) {
+    const answer = (await prompt(rl, question)).trim();
+    if (answer === '') return defaultVal;
+    const n = parseInt(answer, 10);
+    if (!isNaN(n) && n >= 1) return n;
+    console.log('  请输入正整数，或直接 Enter 使用默认值。');
+  }
+}
+
+console.log('\n═══════════════════════════════════════');
+console.log('  抢票张数（BW_TICKET_QUANTITY）');
+console.log('═══════════════════════════════════════');
+console.log('  ⚠️  2 张及以上为实验性功能，可能出现非预期行为。');
+const ticketQuantity = await askPositiveInt('请输入抢票张数（默认 1，直接 Enter 跳过）: ', 1);
+
+// ─── browser instances ────────────────────────────────────────────────────────
+
+// console.log('\n═══════════════════════════════════════');
+// console.log('  浏览器选项卡数（BW_INSTANCES）');
+// console.log('═══════════════════════════════════════');
+// console.log('  ⚠️  2 个及以上为实验性功能，可能出现非预期行为。');
+// const instances = await askPositiveInt('请输入选项卡数量（默认 1，直接 Enter 跳过）: ', 1);
+
 rl.close();
 
 // ─── write .env ───────────────────────────────────────────────────────────────
@@ -324,16 +364,20 @@ if (chosenStartTime !== null) {
 }
 envContent = setEnvKey(envContent, 'BW_CLICK_LIMIT_INTERVAL_MS', clickLimitMs);
 envContent = setEnvKey(envContent, 'BW_CHECK_TICKET_INTERVAL_MS', checkTicketMs);
+envContent = setEnvKey(envContent, 'BW_TICKET_QUANTITY', ticketQuantity);
+envContent = setEnvKey(envContent, 'BW_INSTANCES', instances);
 fs.writeFileSync(ENV_PATH, envContent, 'utf8');
 
 console.log(`\n[setindex] .env updated:`);
-console.log(`  BW_DAY_FLAG               = ${dayFlag}  (${chosenScreen.name})`);
-console.log(`  BW_TICKET_INDEX           = ${ticketIndex}  (${chosenTicket.desc})`);
+console.log(`  BW_DAY_FLAG                 = ${dayFlag}  (${chosenScreen.name})`);
+console.log(`  BW_TICKET_INDEX             = ${ticketIndex}  (${chosenTicket.desc})`);
 if (chosenStartTime !== null) {
-  console.log(`  BW_DETAIL_START_TIME      = ${chosenStartTime}  (${formatSgt(chosenStartTime)})`);
+  console.log(`  BW_DETAIL_START_TIME        = ${chosenStartTime}  (${formatSgt(chosenStartTime)})`);
 } else {
-  console.log(`  BW_DETAIL_START_TIME      = 未修改`);
+  console.log(`  BW_DETAIL_START_TIME        = 未修改`);
 }
 console.log(`  BW_CLICK_LIMIT_INTERVAL_MS  = ${clickLimitMs}ms`);
 console.log(`  BW_CHECK_TICKET_INTERVAL_MS = ${checkTicketMs}ms`);
+console.log(`  BW_TICKET_QUANTITY          = ${ticketQuantity}${ticketQuantity >= 2 ? '  ⚠️ 实验性' : ''}`);
+console.log(`  BW_INSTANCES                = ${instances}${instances >= 2 ? '  ⚠️ 实验性' : ''}`);
 console.log('\n配置完成！可以运行 pnpm start 开始抢票。');

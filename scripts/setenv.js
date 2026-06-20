@@ -169,6 +169,24 @@ if (!fileExists(examplePath)) {
 
 let content = fs.readFileSync(examplePath, 'utf8');
 
+// Preserve user-specific values from existing .env
+const PRESERVE_KEYS = ['BW_DAY_FLAG', 'BW_TICKET_INDEX', 'BW_DETAIL_START_TIME'];
+const preserved = {};
+if (fileExists(envPath)) {
+  for (const line of fs.readFileSync(envPath, 'utf8').split(/\r?\n/)) {
+    const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
+    if (m && PRESERVE_KEYS.includes(m[1])) {
+      preserved[m[1]] = m[2].trim();
+    }
+  }
+  if (Object.keys(preserved).length) {
+    console.log(`[setenv] 已保留以下值（来自现有 .env）：`);
+    for (const [k, v] of Object.entries(preserved)) {
+      console.log(`  ${k} = ${v}`);
+    }
+  }
+}
+
 // Browser detection
 const chromeExe = detectChrome();
 const edgeExe   = detectEdge();
@@ -190,9 +208,20 @@ if (chromeExe) {
   content = setEnvKey(content, 'BW_BROWSER_EXECUTABLE', '');
 }
 
-// Next 12:00 SGT
+// Next 12:00 SGT (only set if not preserved from existing .env)
 const nextNoon = nextNoon12SgtMs();
-content = setEnvKey(content, 'BW_DETAIL_START_TIME', nextNoon);
+if (preserved['BW_DETAIL_START_TIME']) {
+  content = setEnvKey(content, 'BW_DETAIL_START_TIME', preserved['BW_DETAIL_START_TIME']);
+} else {
+  content = setEnvKey(content, 'BW_DETAIL_START_TIME', nextNoon);
+}
+
+// Restore other preserved keys
+for (const key of ['BW_DAY_FLAG', 'BW_TICKET_INDEX']) {
+  if (preserved[key] !== undefined) {
+    content = setEnvKey(content, key, preserved[key]);
+  }
+}
 
 // Format as human-readable SGT string
 function formatSgt(ms) {
@@ -209,6 +238,11 @@ console.log(`[setenv] BW_EDGE_PROFILE     = ${edgeProfile}`);
 fs.writeFileSync(envPath, content, 'utf8');
 console.log(`[setenv] .env written to ${envPath}`);
 console.log('');
-console.log(`⏰  抢票开始时间默认设置为了：${formatSgt(nextNoon)}`);
+if (preserved['BW_DETAIL_START_TIME']) {
+  const preservedMs = Number(preserved['BW_DETAIL_START_TIME']);
+  console.log(`⏰  抢票开始时间已保留原值：${formatSgt(preservedMs)}`);
+} else {
+  console.log(`⏰  抢票开始时间默认设置为了：${formatSgt(nextNoon)}`);
+}
 console.log(`    如需修改，请编辑 .env 中的 BW_DETAIL_START_TIME（毫秒时间戳）`);
 console.log(`    接下来请执行 pnpm run login 登录`);

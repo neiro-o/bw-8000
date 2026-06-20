@@ -25,7 +25,9 @@ async function checkAndClickLimit(page) {
 
   const button = page.locator(selectors.requestLimitButton).first();
   if (await isClickableButton(button)) {
-    await button.click();
+    await button.click({ timeout: 2000 }).catch(error => {
+      console.warn(`[confirm] request-limit dialog button click failed: ${error.message}`);
+    });
     await recordLimitClick(nowText());
     console.log('[confirm] clicked request-limit dialog button');
   }
@@ -40,7 +42,9 @@ async function simulateClick(page) {
 
   const button = page.locator(selectors.orderButton).first();
   if (await isClickableButton(button)) {
-    await button.click();
+    await button.click({ timeout: 2000 }).catch(error => {
+      console.warn(`[confirm] submit order button click failed: ${error.message}`);
+    });
     console.log('[confirm] clicked submit order button');
     return true;
   }
@@ -52,11 +56,13 @@ async function simulateClick(page) {
 async function updateBuyerInfoOverlay(page) {
   const stats = await readStats();
 
-  await page.locator(selectors.buyerTagName).evaluateAll(elements => {
-    for (const element of elements) {
-      element.textContent = '已匿名';
-    }
-  }).catch(() => {});
+  if (config.ticketQuantity < 2) {
+    await page.locator(selectors.buyerTagName).evaluateAll(elements => {
+      for (const element of elements) {
+        element.textContent = '已匿名';
+      }
+    }).catch(() => {});
+  }
 
   await page.locator(selectors.buyerDetailContent).evaluateAll((elements, displayStats) => {
     for (const element of elements) {
@@ -76,11 +82,48 @@ async function updateBuyerInfoOverlay(page) {
   }).catch(() => {});
 }
 
+async function ensureBuyersSelected(page) {
+  const buyerTags = page.locator(selectors.buyerTag);
+  const count = await buyerTags.count();
+  if (count < config.ticketQuantity) {
+    console.warn(`[confirm] only ${count} buyer tags found, but ${config.ticketQuantity} are required`);
+    return false;
+  }
+
+  for (let index = 0; index < config.ticketQuantity; index += 1) {
+    const buyerTag = buyerTags.nth(index);
+    const selected = await buyerTag.evaluate(element =>
+      element.classList.contains('selected')
+    ).catch(() => false);
+    if (!selected) {
+      try {
+        await buyerTag.click({ timeout: 2000 });
+        await buyerTag.waitFor({ state: 'visible', timeout: 2000 });
+        await page.waitForFunction(
+          ({ selector, targetIndex }) =>
+            document.querySelectorAll(selector)[targetIndex]?.classList.contains('selected') === true,
+          { selector: selectors.buyerTag, targetIndex: index },
+          { timeout: 2000 }
+        );
+      } catch (error) {
+        console.warn(`[confirm] buyer tag ${index + 1} was not selected: ${error.message}`);
+        return false;
+      }
+    }
+  }
+
+  console.log(`[confirm] first ${config.ticketQuantity} buyer tag(s) selected`);
+  return true;
+}
+
 async function selectBuyer(page) {
   while (page.url().startsWith('https://mall.bilibili.com/neul-next/ticket/confirmOrder.html')) {
     const buyerTag = page.locator(selectors.buyerTag).first();
     if (await isVisible(buyerTag)) {
-      await buyerTag.click();
+      if (!(await ensureBuyersSelected(page))) {
+        await sleep(100);
+        continue;
+      }
       await dispatchVisibilityChange(page);
       await sleep(47);
       await updateBuyerInfoOverlay(page);
@@ -112,7 +155,11 @@ function getSubmitLoopState(enteredAt) {
 export async function runConfirmOrderPage(page) {
   void sendText(`📝 进入 confirmPage\n${page.url()}`);
   void updateBuyerInfoOverlayLoop(page);
-  await waitUntilAutomationStartTime('confirm');
+  const stillOnConfirmPage = await waitUntilAutomationStartTime(
+    'confirm',
+    () => page.url().startsWith('https://mall.bilibili.com/neul-next/ticket/confirmOrder.html')
+  );
+  if (!stillOnConfirmPage) return;
   console.log('[confirm] running confirm-order automation');
   await updateStats(stats => ({ ...stats, lastConfirmPage: page.url() }));
 
