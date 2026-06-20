@@ -3,6 +3,7 @@ import { selectors } from '../selectors.js';
 import { isClickableButton, isVisible, nowText, sleep } from '../utils.js';
 import { recordEnter } from '../storage.js';
 import { waitUntilAutomationStartTime } from '../automationStartTime.js';
+import { waitForRapidDetailPageEntries } from '../detailPageThrottle.js';
 import { sendText, sendTextOnce } from '../feishu/index.js';
 
 async function dispatchVisibilityChange(page) {
@@ -402,6 +403,8 @@ async function runPurchaseAttemptLoop(page) {
 export async function runDetailPage(page, context) {
   void sendText(`🔎 进入 detailPage\n${page.url()}`);
   console.log(`[detail] watching project ${config.projectId}, day flag ${config.dayFlag}`);
+  await waitForRapidDetailPageEntries(page);
+  if (!page.url().startsWith('https://mall.bilibili.com/neul-next/ticket/detail.html')) return;
   // Keep the detail API hook installed at all times; detail getV2 may fire before this page runner starts.
   await ensureDetailApiHook(page);
   console.log('[detail] installed detail-page ticket API hook');
