@@ -4,6 +4,7 @@ import { fetchTicketStatus } from '../ticketApi.js';
 import { isClickableButton, isVisible, nowText, sleep } from '../utils.js';
 import { recordEnter, recordFound } from '../storage.js';
 import { waitUntilAutomationStartTime } from '../automationStartTime.js';
+import { sendText, sendTextOnce } from '../feishu/index.js';
 
 async function dispatchVisibilityChange(page) {
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
@@ -332,6 +333,7 @@ async function runPurchaseAttemptLoop(page) {
 }
 
 export async function runDetailPage(page, context) {
+  void sendText(`🔎 进入 detailPage\n${page.url()}`);
   console.log(`[detail] watching project ${config.projectId}, day flag ${config.dayFlag}`);
   // Keep the detail API hook installed at all times; detail getV2 may fire before this page runner starts.
   await ensureDetailApiHook(page);
@@ -342,6 +344,7 @@ export async function runDetailPage(page, context) {
     () => page.url().startsWith('https://mall.bilibili.com/neul-next/ticket/detail.html')
   );
   if (!stillOnDetailPage) return;
+  void sendTextOnce('ticketing-started', `🚀 抢票开始\n项目 ID：${config.projectId}`);
 
   // Step 4/5: Do a direct purchase-attempt flow; no detail-page polling loop here.
   await runPurchaseAttemptLoop(page);

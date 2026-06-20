@@ -3,6 +3,7 @@ import { selectors } from '../selectors.js';
 import { isClickableButton, isVisible, jitter, nowText, sleep } from '../utils.js';
 import { readStats, recordLimitClick, updateStats } from '../storage.js';
 import { waitUntilAutomationStartTime } from '../automationStartTime.js';
+import { sendText } from '../feishu/index.js';
 
 async function dispatchVisibilityChange(page) {
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
@@ -109,6 +110,7 @@ function getSubmitLoopState(enteredAt) {
 }
 
 export async function runConfirmOrderPage(page) {
+  void sendText(`📝 进入 confirmPage\n${page.url()}`);
   void updateBuyerInfoOverlayLoop(page);
   await waitUntilAutomationStartTime('confirm');
   console.log('[confirm] running confirm-order automation');
