@@ -341,11 +341,11 @@ const ticketQuantity = await askPositiveInt('请输入抢票张数（默认 1，
 
 // ─── browser instances ────────────────────────────────────────────────────────
 
-// console.log('\n═══════════════════════════════════════');
-// console.log('  浏览器选项卡数（BW_INSTANCES）');
-// console.log('═══════════════════════════════════════');
-// console.log('  ⚠️  2 个及以上为实验性功能，可能出现非预期行为。');
-// const instances = await askPositiveInt('请输入选项卡数量（默认 1，直接 Enter 跳过）: ', 1);
+console.log('\n═══════════════════════════════════════');
+console.log('  浏览器选项卡数（BW_INSTANCES）');
+console.log('═══════════════════════════════════════');
+console.log('  ⚠️  2 个及以上为实验性功能，可能出现非预期行为。');
+const instances = await askPositiveInt('请输入选项卡数量（默认 1，直接 Enter 跳过）: ', 1);
 
 rl.close();
 

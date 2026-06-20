@@ -98,54 +98,71 @@ if (config.hideWebdriver) {
   console.log('[browser] webdriver fingerprint hidden');
 }
 
-const page = context.pages()[0] ?? await context.newPage();
-
-page.on('pageerror', error => {
-  console.error(`[browser:error] ${error.message}`);
-});
-
 context.on('close', () => {
   console.log('[browser] browser closed, exiting.');
   void shutdown('浏览器已关闭');
 });
 
 if (args.has('--login')) {
+  const page = context.pages()[0] ?? await context.newPage();
   await page.goto('https://www.bilibili.com/', { waitUntil: 'domcontentloaded' });
   console.log(`login mode: finish login in the opened ${browser} window, then close this process manually.`);
   while (true) await sleep(1000);
 }
 
-async function gotoDetailPage() {
+async function gotoDetailPage(page) {
   await ensureDetailApiHook(page);
   await page.goto(detailUrl(config.projectId), { waitUntil: 'domcontentloaded' });
 }
 
-await gotoDetailPage();
+async function runAutomation(page, instanceId) {
+  const label = `[instance:${instanceId + 1}]`;
+  page.on('pageerror', error => {
+    console.error(`${label} [browser:error] ${error.message}`);
+  });
+  page.on('close', () => console.log(`${label} tab closed`));
 
-while (true) {
-  const url = page.url();
+  console.log(`${label} automation started`);
+  await gotoDetailPage(page);
 
-  if (url.startsWith('https://mall.bilibili.com/neul-next/ticket/detail.html')) {
-    const current = new URL(url);
-    if (current.searchParams.get('id') === String(config.projectId)) {
-      await runDetailPage(page, context);
+  while (!page.isClosed()) {
+    const url = page.url();
+
+    if (url.startsWith('https://mall.bilibili.com/neul-next/ticket/detail.html')) {
+      const current = new URL(url);
+      if (current.searchParams.get('id') === String(config.projectId)) {
+        await runDetailPage(page, context);
+      } else {
+        console.warn(`${label} [router] current detail page project does not match ${config.projectId}: ${url}`);
+        await gotoDetailPage(page);
+      }
+    } else if (url.startsWith('https://mall.bilibili.com/neul-next/ticket/confirmOrder.html')) {
+      await runConfirmOrderPage(page, context);
+    } else if (url.startsWith('https://pay.bilibili.com')) {
+      await runPaymentPage(page);
+    } else if (
+      url.startsWith('https://mall.bilibili.com') ||
+      url.startsWith('https://pay.bilibili.com')
+    ) {
+      console.log(`${label} [router] unhandled bilibili page, waiting: ${url}`);
     } else {
-      console.warn(`[router] current detail page project does not match ${config.projectId}: ${url}`);
-      await gotoDetailPage();
+      console.log(`${label} [router] unhandled page, returning to detail page: ${url}`);
+      await gotoDetailPage(page);
     }
-  } else if (url.startsWith('https://mall.bilibili.com/neul-next/ticket/confirmOrder.html')) {
-    await runConfirmOrderPage(page, context);
-  } else if (url.startsWith('https://pay.bilibili.com')) {
-    await runPaymentPage(page);
-  } else if (
-    url.startsWith('https://mall.bilibili.com') ||
-    url.startsWith('https://pay.bilibili.com')
-  ) {
-    console.log(`[router] unhandled bilibili page, waiting: ${url}`);
-  } else {
-    console.log(`[router] unhandled page, returning to detail page: ${url}`);
-    await gotoDetailPage();
-  }
 
-  await sleep(250);
+    await sleep(250);
+  }
 }
+
+const existingPages = context.pages();
+const pages = [];
+for (let index = 0; index < config.instances; index += 1) {
+  pages.push(existingPages[index] ?? await context.newPage());
+}
+
+console.log(`[browser] running ${pages.length} automation tab(s)`);
+await Promise.all(pages.map((page, index) =>
+  runAutomation(page, index).catch(error => {
+    console.error(`[instance:${index + 1}] automation stopped: ${error.stack ?? error.message}`);
+  })
+));

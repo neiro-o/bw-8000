@@ -14,6 +14,10 @@ const defaults = {
   lastConfirmPage: ''
 };
 
+// Multiple tabs share this file. Keep every read-modify-write transaction in
+// one queue so concurrent automations cannot overwrite each other's counters.
+let updateQueue = Promise.resolve();
+
 export async function readStats() {
   try {
     const raw = await readFile(statsPath, 'utf8');
@@ -33,10 +37,14 @@ export async function resetStats() {
 }
 
 export async function updateStats(updater) {
-  const current = await readStats();
-  const next = updater({ ...current });
-  await writeStats(next);
-  return next;
+  const operation = updateQueue.then(async () => {
+    const current = await readStats();
+    const next = await updater({ ...current });
+    await writeStats(next);
+    return next;
+  });
+  updateQueue = operation.catch(() => {});
+  return operation;
 }
 
 export async function recordEnter(timeText) {

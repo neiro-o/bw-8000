@@ -112,9 +112,7 @@ async function installDetailApiHook(context) {
       await route.continue();
       // Wait, then dispatch visibilitychange so the page re-issues the API call and the hook gets another chance.
       await sleep(400);
-      const detailPage = context.pages().find(p =>
-        p.url().startsWith('https://mall.bilibili.com/neul-next/ticket/detail.html')
-      );
+      const detailPage = route.request().frame().page();
       if (detailPage) {
         await detailPage.evaluate(() =>
           document.dispatchEvent(new Event('visibilitychange'))
@@ -134,10 +132,13 @@ export async function ensureDetailApiHook(pageOrContext) {
     : pageOrContext;
 
   // Install once on the browser context so repeated detail getV2 calls keep being intercepted.
-  if (!context.__bwDetailApiHook) {
-    context.__bwDetailApiHook = await installDetailApiHook(context);
+  if (!context.__bwDetailApiHookPromise) {
+    context.__bwDetailApiHookPromise = installDetailApiHook(context).catch(error => {
+      delete context.__bwDetailApiHookPromise;
+      throw error;
+    });
   }
-  return context.__bwDetailApiHook;
+  return context.__bwDetailApiHookPromise;
 }
 
 
