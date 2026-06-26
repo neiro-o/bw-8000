@@ -30,7 +30,7 @@
         ticketQuantity: 1,
         clickLimitIntervalMs: 200,
         checkTicketIntervalMs: 500,
-        detailStartTime: 1782014399000,
+        detailStartTime: 1782619199000,
         successUrl: 'https://www.bilibili.com/video/BV1sa4y1H7ek'
     };
 
@@ -390,6 +390,25 @@
         return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
     }
 
+    function formatClockTime(date = new Date()) {
+        const pad = value => String(value).padStart(2, '0');
+        return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+    }
+
+    function updateDetailWaitingTitle() {
+        const title = document.querySelector('.title-text');
+        if (title) title.textContent = `走马灯已部署，当前时间: ${formatClockTime()}`;
+    }
+
+    function startDetailWaitingTitleTicker() {
+        const startTime = readConfig().detailStartTime;
+        if (!startTime || Date.now() >= startTime) return null;
+
+        // Only show the waiting ticker before automation starts; clear it as soon as the wait ends.
+        updateDetailWaitingTitle();
+        return window.setInterval(updateDetailWaitingTitle, 1000);
+    }
+
     function routeCurrentPage() {
         // Router mirrors src/index.js, but only for pages Tampermonkey can observe in the current tab.
         if (location.href.startsWith('https://mall.bilibili.com/neul-next/ticket/detail.html')) {
@@ -417,7 +436,10 @@
 
     async function runDetailPage() {
         console.info(`[bw:detail] watching project ${FIXED_PROJECT_ID}, day flag ${config.dayFlag}`);
-        if (!await waitUntilStart('detail', () => location.href.startsWith('https://mall.bilibili.com/neul-next/ticket/detail.html'))) return;
+        const waitingTitleTicker = startDetailWaitingTitleTicker();
+        const started = await waitUntilStart('detail', () => location.href.startsWith('https://mall.bilibili.com/neul-next/ticket/detail.html'));
+        if (waitingTitleTicker) window.clearInterval(waitingTitleTicker);
+        if (!started) return;
         void runDetailRequestLimitLoop();
         await runPurchaseAttemptLoop();
     }
@@ -690,7 +712,7 @@
 
         if (readConfig().ticketQuantity < 2) {
             document.querySelectorAll(selectors.buyerTagName).forEach(element => {
-                element.textContent = '已匹配';
+                element.textContent = '已匿名';
             });
         }
 
